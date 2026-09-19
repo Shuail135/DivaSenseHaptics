@@ -1,0 +1,8 @@
+enabled = true
+dll = ["DivaSenseHaptics.dll"]
+
+name = "DivaSense Haptics"
+description = "Dualsense controller tested only. Haptics now according to game, u can fine tune in haptics.ini"
+version = "0.1.0"
+date = "18.09.2026"
+author = "Shuail"
