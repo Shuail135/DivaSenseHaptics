@@ -34,19 +34,14 @@ public:
 
     // Called from the game's GetHitState hook.
     void OnGamePoll();
-    // Called by the internal game target hook for every successfully evaluated
-    // DIVA target. These are correlated to the outer COOL/FINE/etc judgement by
-    // timestamp rather than assuming a particular call nesting/order.
-    void OnInternalTargetHit(void* target, int32_t rawHitState);
     void OnJudgement(int32_t rawHitState, bool slide, bool slideChain,
                      bool slideChainStart, bool slideChainMax,
                      bool slideChainContinues, bool successNote,
-                     int reportedMultiCount, int directTargetCount = 0);
+                     int reportedMultiCount);
 
     void SetHookAvailable(bool available);
     bool HookAvailable() const;
     bool InGameplay() const;
-    void Reset();
     void Tick();
 
     static Decoded Decode(int32_t rawHitState, int reportedMultiCount = 0);
@@ -62,16 +57,6 @@ private:
         bool slide = false;
         TP when{};
     };
-    struct Orphan {
-        Decoded decoded{};
-        bool slide = false;
-        TP when{};
-    };
-    struct TargetHit {
-        void* target = nullptr;
-        int32_t raw = 21;
-        TP when{};
-    };
     struct FaceSample {
         uint8_t mask = 0;
         TP when{};
@@ -79,8 +64,9 @@ private:
     struct ConfirmBurst {
         bool active = false;
         Decoded decoded{};
+        Grade bodyGrade = Grade::None;
+        int32_t rawHitState = 21;
         int callbackCount = 0;
-        int directTargetCount = 0;
         int reportedMax = 1;
         int hintedCount = 1;
         Pending pending{};
@@ -98,12 +84,10 @@ private:
     HapticEvent gradeEvent(Grade grade) const;
     int pendingCount(const Pending& p) const;
     void purgeLocked(TP now);
-    int correlatedTargetCountLocked(const ConfirmBurst& burst) const;
     int physicalChordCountLocked(const ConfirmBurst& burst, uint8_t& maskOut) const;
     int findPendingLocked(const Decoded& d, bool slide, TP now) const;
-    int findOrphanLocked(const Pending& p, TP now) const;
     static HapticEvent eventForGameResult(const Pending* pending, const Decoded& decoded, bool gameSlide);
-    void playConfirmed(const Pending* pending, const Decoded& decoded, bool gameSlide, bool playOverlay);
+    void playConfirmed(const Pending* pending, const Decoded& decoded, bool gameSlide);
     void playGradeOverlay(Grade grade);
     bool takeBurstLocked(TP now, bool force, ConfirmBurst& out);
     void emitBurst(const ConfirmBurst& burst);
@@ -113,11 +97,10 @@ private:
     ChartAwareness* chart_ = nullptr;
     mutable std::mutex mutex_;
     std::deque<Pending> pending_;
-    std::deque<Orphan> orphan_;
-    std::deque<TargetHit> targetHits_;
     std::deque<FaceSample> faceSamples_;
     ConfirmBurst burst_{};
     bool hookAvailable_ = false;
+    unsigned unknownResultLogs_ = 0;
     TP lastGamePoll_{};
 
     uint8_t physicalFaceMask_ = 0;

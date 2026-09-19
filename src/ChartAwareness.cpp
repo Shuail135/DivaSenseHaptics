@@ -16,17 +16,16 @@ bool ChartAwareness::shapeMatches(const Obs&o,const DscChartGroup&g){
 
 void ChartAwareness::SetChart(DscChart chart){
     std::lock_guard lock(mutex_);
-    chart_=std::move(chart); recent_.clear(); locked_=false; offset_=0; lastIndex_=0; lastMatched_={}; challengeState_.reset(); misses_=0;
+    chart_=std::move(chart); recent_.clear(); locked_=false; offset_=0; lastIndex_=0; challengeState_.reset(); misses_=0;
     if(chart_.valid) Log::Info("Chart awareness loaded DSC; waiting for confirmed judgements to lock chart timing.");
 }
 
 void ChartAwareness::ClearChart(){
     std::lock_guard lock(mutex_);
-    chart_={}; recent_.clear(); locked_=false; offset_=0; lastIndex_=0; lastMatched_={}; challengeState_.reset(); misses_=0;
+    chart_={}; recent_.clear(); locked_=false; offset_=0; lastIndex_=0; challengeState_.reset(); misses_=0;
 }
 
 bool ChartAwareness::HasChart() const{std::lock_guard lock(mutex_);return chart_.valid;}
-bool ChartAwareness::IsLocked() const{std::lock_guard lock(mutex_);return locked_;}
 
 bool ChartAwareness::tryLockLocked(ChartJudgementMatch& latest){
     if(!chart_.valid || recent_.size()<4) return false;
@@ -66,7 +65,7 @@ bool ChartAwareness::tryLockLocked(ChartJudgementMatch& latest){
     double sum=0.0;
     for(size_t j=0;j<bestIndices.size();++j) sum+=seconds(obs[j].when)-chart_.groups[bestIndices[j]].hitSeconds;
     offset_=sum/static_cast<double>(bestIndices.size());
-    locked_=true; lastIndex_=bestIndices.back(); lastMatched_=obs.back().when; misses_=0;
+    locked_=true; lastIndex_=bestIndices.back(); misses_=0;
     challengeState_=chart_.groups[lastIndex_].challenge;
     latest.chartAvailable=true; latest.locked=true; latest.matched=true; latest.group=chart_.groups[lastIndex_]; latest.groupIndex=static_cast<int>(lastIndex_);
     latest.timingErrorMs=(seconds(obs.back().when)-offset_-latest.group.hitSeconds)*1000.0;
@@ -117,7 +116,7 @@ ChartJudgementMatch ChartAwareness::ObserveJudgement(TP when,bool slide,bool suc
         return out;
     }
 
-    misses_=0; lastIndex_=*idx; lastMatched_=when;
+    misses_=0; lastIndex_=*idx;
     const auto&g=chart_.groups[*idx];
     const double measured=seconds(when)-g.hitSeconds;
     offset_=offset_*0.94+measured*0.06;

@@ -12,15 +12,6 @@ void MenuHaptics::Init(IDXGISwapChain*,ID3D11Device* d,ID3D11DeviceContext* c){
     stableSince_={};
 }
 
-void MenuHaptics::Reset(){
-    std::lock_guard lock(mutex_);
-    pending_.clear();
-    previous_.clear();
-    generation_=0;
-    motionEma_=0.0f;
-    stableSince_={};
-}
-
 bool MenuHaptics::ensureStaging(IDXGISwapChain* swap){
     if(!device_||!swap)return false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> back;
@@ -118,6 +109,11 @@ const char* MenuHaptics::actionName(MenuAction action)const{
 void MenuHaptics::Submit(MenuAction action){
     if(!cfg_.menu.enabled)return;
     if(judgement_ && (!judgement_->HookAvailable() || judgement_->InGameplay()))return;
+    if(!cfg_.menu.visualValidation){
+        engine_.Trigger(eventFor(action));
+        if(cfg_.menu.logEvents)Log::Info(std::string("Menu input: ")+actionName(action));
+        return;
+    }
     const auto now=Clock::now();
     std::lock_guard lock(mutex_);
     bool settled=stableSince_!=TP{} &&
@@ -127,6 +123,7 @@ void MenuHaptics::Submit(MenuAction action){
 }
 
 void MenuHaptics::Tick(IDXGISwapChain* swap){
+    if(!cfg_.menu.visualValidation)return;
     if(!cfg_.menu.enabled||!device_||!context_||!swap)return;
     if(judgement_ && judgement_->InGameplay()){
         std::lock_guard lock(mutex_);

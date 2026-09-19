@@ -44,8 +44,7 @@ struct ModConfig {
     struct Effects {
         float singleGain = 0.64f;
         float multiGain = 0.96f;
-        // Extra strength by confirmed chord size. v0.4.5 prefers direct DIVA target counting and falls back to the confirmed
-        // DIVA judgement with the time-stamped physical face-button mask.
+        // Extra strength by confirmed chord size.
         float multi2Multiplier = 1.10f;
         float multi3Multiplier = 1.28f;
         float multi4Multiplier = 1.48f;
@@ -61,10 +60,6 @@ struct ModConfig {
 
     struct Judgement {
         bool enabled = true;
-        // Strict mode means a raw physical press never becomes a gameplay haptic
-        // by itself. A real DIVA judgement must confirm it first.
-        bool strictValidation = true;
-        float pressPreviewGain = 0.0f;
         float coolGain = 1.00f;
         float fineGain = 0.82f;
         float safeGain = 0.58f;
@@ -81,16 +76,13 @@ struct ModConfig {
         // How far around the confirmed judgement to look for the maximum
         // simultaneous face-button mask. This removes the HID-vs-game timing race.
         int physicalMultiWindowMs = 24;
-        // Direct per-target game checks may occur just before or after the outer
-        // COOL/FINE/etc. judgement. Correlate them inside this short window.
-        int targetCorrelationWindowMs = 12;
         bool logEvents = false;
     } judgement;
 
     struct Menu {
         bool enabled = true;
-        // UI actions are not fired on the controller edge. They are held briefly
-        // and accepted only if the rendered menu reacts immediately afterwards.
+        bool visualValidation = false;
+        // Screen-response thresholds apply only when visualValidation is enabled.
         float navGain = 0.56f;
         float confirmGain = 0.88f;
         int validationWindowMs = 120;
@@ -113,15 +105,6 @@ struct ModConfig {
 
     struct Challenge {
         bool enabled = true;
-        // The old black-bar detector is heuristic and can false-positive on PV
-        // transitions. Keep it opt-in until an exact MODE_SELECT hook is used.
-        bool visualDetection = false;
-        int sampleIntervalMs = 160;
-        float darkThreshold = 0.055f;
-        float centerMinimum = 0.085f;
-        float contrastMinimum = 0.040f;
-        int enterSamples = 3;
-        int exitSamples = 4;
     } challenge;
 
     static ModConfig Load(const std::filesystem::path& path);

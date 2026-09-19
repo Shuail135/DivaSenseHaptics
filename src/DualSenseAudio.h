@@ -13,7 +13,6 @@ public:
     ~DualSenseAudio(){Stop();}
     bool Start();
     void Stop();
-    bool Running()const{return running_.load();}
 private:
     void threadMain();
     HapticEngine& engine_;ModConfig cfg_;

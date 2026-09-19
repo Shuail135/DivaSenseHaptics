@@ -23,7 +23,6 @@ public:
     void Init(IDXGISwapChain* swap,ID3D11Device* device,ID3D11DeviceContext* context);
     void Submit(MenuAction action);
     void Tick(IDXGISwapChain* swap);
-    void Reset();
 
 private:
     using Clock=std::chrono::steady_clock;

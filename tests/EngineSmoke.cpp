@@ -5,6 +5,9 @@
 #include "HapticEngine.h"
 #include "InputHaptics.h"
 #include "JudgementHaptics.h"
+#ifdef _WIN32
+#include "MenuHaptics.h"
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -69,13 +72,19 @@ int main(){
     ModConfig buttonCfg=fxCfg;
     buttonCfg.input.multiWindowMs=0;
     HapticEngine buttonEngine;buttonEngine.Configure(buttonCfg);
-    InputHaptics buttonInput(buttonEngine,buttonCfg);
+    buttonCfg.judgement.multiGroupWindowMs=1;
+    JudgementHaptics buttonJudge(buttonEngine,buttonCfg);
+    buttonJudge.SetHookAvailable(true);buttonJudge.OnGamePoll();
+    InputHaptics buttonInput(buttonEngine,buttonCfg,&buttonJudge);
     uint8_t buttonReport[11]{};
     buttonReport[0]=1;buttonReport[1]=buttonReport[2]=buttonReport[3]=buttonReport[4]=128;buttonReport[8]=neutralDpad();
     buttonInput.OnUsbReport(buttonReport,sizeof(buttonReport));
     buttonReport[8]=static_cast<uint8_t>(neutralDpad()|0x20); // Cross / XInput A
     buttonInput.OnUsbReport(buttonReport,sizeof(buttonReport));
     buttonInput.OnUsbReport(buttonReport,sizeof(buttonReport));
+    require(renderPeaks(buttonEngine).all<0.001f,"raw input bypassed judgement");
+    buttonJudge.OnJudgement(0,false,false,false,false,false,false,1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));buttonJudge.Tick();
     auto pbutton=renderPeaks(buttonEngine,256);
     require(pbutton.all>0.02f, "single Cross button report did not produce a haptic");
 
@@ -85,26 +94,35 @@ int main(){
     macroCfg.input.l1MacroMask=0x09; // square+triangle
     macroCfg.input.shouldersAsSlides=true; // macro has priority for L1 only
     HapticEngine macroEngine;macroEngine.Configure(macroCfg);
-    InputHaptics macroInput(macroEngine,macroCfg);
+    macroCfg.judgement.multiGroupWindowMs=1;
+    JudgementHaptics macroJudge(macroEngine,macroCfg);
+    macroJudge.SetHookAvailable(true);macroJudge.OnGamePoll();
+    InputHaptics macroInput(macroEngine,macroCfg,&macroJudge);
     uint8_t report[64]{};
     report[0]=1;report[1]=report[2]=report[3]=report[4]=128;report[8]=neutralDpad();
     macroInput.OnUsbReport(report,sizeof(report));
     report[9]=0x01; // L1
     macroInput.OnUsbReport(report,sizeof(report));
     macroInput.OnUsbReport(report,sizeof(report)); // flush zero-ms pending window
+    macroJudge.OnJudgement(0,false,false,false,false,false,false,1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));macroJudge.Tick();
     auto pm=renderPeaks(macroEngine,256);
     require(pm.all>0.02f, "shoulder macro did not produce a multi-note haptic");
 
     // L1+L2 with no macro is detected as a double-left slide and should be left-heavy.
     ModConfig slideCfg=fxCfg;slideCfg.input.slideWindowMs=0;
     HapticEngine slideEngine;slideEngine.Configure(slideCfg);
-    InputHaptics slideInput(slideEngine,slideCfg);
-    std::fill(std::begin(report),std::end(report),0);
+    slideCfg.judgement.multiGroupWindowMs=1;
+    JudgementHaptics slideJudge(slideEngine,slideCfg);
+    slideJudge.SetHookAvailable(true);slideJudge.OnGamePoll();
+    InputHaptics slideInput(slideEngine,slideCfg,&slideJudge);
+    std::fill(std::begin(report),std::end(report),uint8_t{0});
     report[0]=1;report[1]=report[2]=report[3]=report[4]=128;report[8]=neutralDpad();
     slideInput.OnUsbReport(report,sizeof(report));
     report[9]=0x05; // L1 + L2
     slideInput.OnUsbReport(report,sizeof(report));
     slideInput.OnUsbReport(report,sizeof(report));
+    slideJudge.OnJudgement(0,true,false,false,false,false,false,1);
     auto ps=renderPeaks(slideEngine,256);
     require(ps.left>ps.right*1.3f, "double-left slide was not sufficiently left-biased");
 
@@ -122,12 +140,13 @@ int main(){
     // During gameplay the main body waits for DIVA's confirmation, then uses the grade.
     ModConfig judgeCfg=fxCfg;
     judgeCfg.judgement.enabled=true;
-    judgeCfg.judgement.pressPreviewGain=0.0f;
+    // Raw presses must never bypass judgement confirmation.
     judgeCfg.judgement.overlayGain=0.42f;
     judgeCfg.judgement.multiGroupWindowMs=1;
-    judgeCfg.judgement.targetCorrelationWindowMs=1;
     HapticEngine judgeEngine;judgeEngine.Configure(judgeCfg);
     JudgementHaptics judge(judgeEngine,judgeCfg);
+    judge.Submit(HapticEvent::Cross,0x02,false);
+    require(renderPeaks(judgeEngine,128).all<0.001f, "missing hook allowed raw gameplay haptics");
     judge.SetHookAvailable(true);
     judge.OnGamePoll();
     judge.Submit(HapticEvent::Cross,0x02,false);
@@ -138,6 +157,15 @@ int main(){
     auto coolConfirmed=renderPeaks(judgeEngine,256);
     require(coolConfirmed.all>0.02f, "confirmed COOL did not produce haptic feedback");
 
+    ModConfig disabledCfg=judgeCfg;
+    disabledCfg.judgement.enabled=false;
+    HapticEngine disabledEngine;disabledEngine.Configure(disabledCfg);
+    JudgementHaptics disabledJudge(disabledEngine,disabledCfg);
+    disabledJudge.Submit(HapticEvent::Cross,0x02,false);
+    disabledJudge.OnJudgement(0,false,false,false,false,false,false,1);
+    disabledJudge.Tick();
+    require(renderPeaks(disabledEngine,256).all<0.001f, "disabled judgements allowed gameplay note feedback");
+
 
     // Game-resolved input must work without a raw HID/XInput candidate. This is what
     // lets Mega Mix+ keybinds, Steam remaps, keyboard keys and in-game macros follow
@@ -146,7 +174,6 @@ int main(){
     gameMapCfg.judgement.enabled=true;
     gameMapCfg.judgement.overlayGain=0.0f;
     gameMapCfg.judgement.multiGroupWindowMs=1;
-    gameMapCfg.judgement.targetCorrelationWindowMs=1;
     gameMapCfg.audio.masterGain=0.42f;
     HapticEngine gameSingleEngine;gameSingleEngine.Configure(gameMapCfg);
     JudgementHaptics gameSingle(gameSingleEngine,gameMapCfg);
@@ -177,6 +204,93 @@ int main(){
     require(game3Peak.all>game2Peak.all, "3-note confirmation was not stronger than a 2-note confirmation");
     require(game4Peak.all>game3Peak.all, "4-note confirmation was not stronger than a 3-note confirmation");
 
+    // Full report -> judgement -> PCM path, with either thread arriving first.
+    for(uint8_t mask : {uint8_t{0x07},uint8_t{0x0b},uint8_t{0x0d},uint8_t{0x0e},uint8_t{0x0f}}) {
+        for(bool macro : {false,true}) for(bool judgementFirst : {false,true}) {
+            ModConfig chordCfg=gameMapCfg;
+            if(macro) chordCfg.input.l1MacroMask=mask;
+            HapticEngine chordEngine;chordEngine.Configure(chordCfg);
+            JudgementHaptics chordJudge(chordEngine,chordCfg);
+            chordJudge.SetHookAvailable(true);chordJudge.OnGamePoll();
+            InputHaptics chordInput(chordEngine,chordCfg,&chordJudge);
+            uint8_t chordReport[11]{1,128,128,128,128,0,0,0,8,0,0};
+            chordInput.OnUsbReport(chordReport,sizeof(chordReport));
+            if(judgementFirst) chordJudge.OnJudgement(0,false,false,false,false,false,false,1);
+            if(macro) chordReport[9]=1;
+            else chordReport[8]=static_cast<uint8_t>(8 | (mask<<4));
+            chordInput.OnUsbReport(chordReport,sizeof(chordReport));
+            if(!judgementFirst) {
+                require(renderPeaks(chordEngine).all<0.001f,"unconfirmed chord produced haptics");
+                chordJudge.OnJudgement(0,false,false,false,false,false,false,1);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));chordJudge.Tick();
+            const auto peaks=renderPeaks(chordEngine,16000);
+            require(peaks.left>0.1f && peaks.right>0.1f,"confirmed physical/macro chord was silent");
+            chordJudge.Tick();
+            require(renderPeaks(chordEngine).all<0.001f,"confirmed chord replayed on next frame");
+        }
+    }
+
+    // A MISS grouped with successful notes must not mute the whole chord.
+    for(int count : {3,4}) for(bool missFirst : {false,true}) {
+        ModConfig mixedCfg=gameMapCfg;mixedCfg.judgement.multiGroupWindowMs=30;
+        HapticEngine chordEngine;chordEngine.Configure(mixedCfg);
+        JudgementHaptics chordJudge(chordEngine,mixedCfg);chordJudge.SetHookAvailable(true);
+        chordJudge.UpdatePhysicalFace(static_cast<uint8_t>((1<<count)-1));
+        if(missFirst) chordJudge.OnJudgement(8,false,false,false,false,false,false,1);
+        for(int i=0;i<count-1;++i) chordJudge.OnJudgement(0,false,false,false,false,false,false,1);
+        if(!missFirst) chordJudge.OnJudgement(8,false,false,false,false,false,false,1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(35));chordJudge.Tick();
+        require(renderPeaks(chordEngine).all>0.1f,"one missed member silenced the successful chord members");
+    }
+    HapticEngine missEngine;missEngine.Configure(gameMapCfg);
+    JudgementHaptics missJudge(missEngine,gameMapCfg);missJudge.SetHookAvailable(true);
+    missJudge.OnJudgement(8,false,false,false,false,false,false,4);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));missJudge.Tick();
+    require(renderPeaks(missEngine).all<0.001f,"all-miss chord incorrectly played successful-note feedback");
+
+    // A partial physical mask must not downgrade the game's three/four-note result,
+    // either during judgement resolution or when the waveform is synthesized.
+    for(int count=3;count<=4;++count) {
+        HapticEngine chordEngine;chordEngine.Configure(gameMapCfg);
+        JudgementHaptics chord(chordEngine,gameMapCfg);chord.SetHookAvailable(true);
+        chord.UpdatePhysicalFace(0x03);
+        chord.OnJudgement(0,false,false,false,false,false,false,count);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));chord.Tick();
+        HapticEngine expected;expected.Configure(gameMapCfg);
+        expected.Trigger(count==3 ? HapticEvent::Multi3 : HapticEvent::Multi4);
+        std::vector<float> actualSamples(1024),expectedSamples(1024);
+        chordEngine.RenderBlock(actualSamples.data(),512,48000);
+        expected.RenderBlock(expectedSamples.data(),512,48000);
+        require(actualSamples==expectedSamples,"partial physical mask downgraded a confirmed chord");
+    }
+
+    // Exercise every nonempty physical combination with the retail reported=1
+    // fallback, including all three-note combinations and the four-note chord.
+    for(uint8_t mask=1;mask<=15;++mask) {
+        HapticEngine maskEngine;maskEngine.Configure(gameMapCfg);
+        JudgementHaptics maskJudge(maskEngine,gameMapCfg);maskJudge.SetHookAvailable(true);
+        maskJudge.UpdatePhysicalFace(mask);
+        maskJudge.OnJudgement(0,false,false,false,false,false,false,1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));maskJudge.Tick();
+        const auto peak=renderPeaks(maskEngine,512);
+        require(peak.left>0.02f && peak.right>0.02f,"physical combination produced no confirmed haptics");
+    }
+
+#ifdef _WIN32
+    // Default menu feedback must work without a rendered/stationary screen.
+    for(auto action : {MenuAction::Up,MenuAction::Down,MenuAction::Left,MenuAction::Right,MenuAction::Confirm}) {
+        HapticEngine menuEngine;menuEngine.Configure(gameMapCfg);
+        JudgementHaptics menuState(menuEngine,gameMapCfg);menuState.SetHookAvailable(true);
+        MenuHaptics menu(menuEngine,gameMapCfg,&menuState);
+        menu.Submit(action);
+        require(renderPeaks(menuEngine,16000).all>0.02f,"menu input required a screen response");
+        menuState.OnGamePoll();
+        menu.Submit(action);
+        require(renderPeaks(menuEngine,512).all<0.001f,"menu feedback leaked into gameplay");
+    }
+#endif
+
 
     // Retail Mega Mix+ can leave the hook's so-called multiCount at 1 even for
     // a real chord. A matched raw multi candidate must override that bad hint.
@@ -193,25 +307,14 @@ int main(){
     // must still turn reported=1/input_hint=1 into Multi2.
     ModConfig physicalCfg=gameMapCfg;
     physicalCfg.judgement.physicalMultiWindowMs=24;
-    physicalCfg.judgement.targetCorrelationWindowMs=1;
     HapticEngine physical2Engine;physical2Engine.Configure(physicalCfg);
     JudgementHaptics physical2(physical2Engine,physicalCfg);physical2.SetHookAvailable(true);
     physical2.OnGamePoll();
     physical2.UpdatePhysicalFace(0x06); // Cross + Circle simultaneously
-    physical2.OnJudgement(0,false,false,false,false,false,false,1,0);
+    physical2.OnJudgement(0,false,false,false,false,false,false,1);
     std::this_thread::sleep_for(std::chrono::milliseconds(13)); physical2.Tick();
     auto physical2Peak=renderPeaks(physical2Engine,512);
     require(physical2Peak.all>gameSinglePeak.all, "physical face window did not recover a 2-note chord from reported multi=1");
-
-    // v0.4.4 direct nested game-target path: the internal DIVA hit routine counted two
-    // judged target objects even though the outer so-called multiCount still says 1.
-    // This is the authoritative path for macros/keybinds and physical chords.
-    HapticEngine direct2Engine;direct2Engine.Configure(gameMapCfg);
-    JudgementHaptics direct2(direct2Engine,gameMapCfg);direct2.SetHookAvailable(true);
-    direct2.OnJudgement(0,false,false,false,false,false,false,1,2);
-    std::this_thread::sleep_for(std::chrono::milliseconds(2)); direct2.Tick();
-    auto direct2Peak=renderPeaks(direct2Engine,512);
-    require(direct2Peak.all>gameSinglePeak.all, "direct DIVA target count=2 did not produce a multi-note haptic");
 
     // Game macros/keybinds may resolve a chord without exposing a raw face mask.
     // Multiple GetHitState callbacks in the same tiny window must coalesce into
@@ -223,19 +326,6 @@ int main(){
     std::this_thread::sleep_for(std::chrono::milliseconds(2)); grouped2.Tick();
     auto grouped2Peak=renderPeaks(grouped2Engine,512);
     require(grouped2Peak.all>gameSinglePeak.all, "same-frame DIVA judgements did not coalesce into a multi-note");
-
-    // v0.4.4 live-game fix: target checks may occur after the outer judgement,
-    // rather than nested inside it. Time correlation must still resolve Multi2.
-    ModConfig corrCfg=gameMapCfg;
-    corrCfg.judgement.targetCorrelationWindowMs=12;
-    HapticEngine corrEngine;corrEngine.Configure(corrCfg);
-    JudgementHaptics corr(corrEngine,corrCfg);corr.SetHookAvailable(true);
-    corr.OnJudgement(0,false,false,false,false,false,false,1,0);
-    corr.OnInternalTargetHit(reinterpret_cast<void*>(0x1010),0);
-    corr.OnInternalTargetHit(reinterpret_cast<void*>(0x2020),0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(14)); corr.Tick();
-    auto corrPeak=renderPeaks(corrEngine,512);
-    require(corrPeak.all>gameSinglePeak.all, "time-correlated DIVA targets did not produce a multi-note");
 
     // The game's exact isSuccessNote flag gets its own additional two-stage effect.
     HapticEngine successOffEngine;successOffEngine.Configure(gameMapCfg);

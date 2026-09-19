@@ -1,4 +1,5 @@
 #include "DscChart.h"
+#include "DscCommands.h"
 #include "Log.h"
 #include <algorithm>
 #include <array>
@@ -6,16 +7,6 @@
 #include <cstring>
 
 namespace {
-constexpr int kParamCount[0x6B] = {
-    0,1,4,2,2,2,7,4,2,6,2,1,6,2,1,1,
-    3,2,3,5,5,4,4,5,2,0,2,4,2,2,1,21,
-    0,3,2,5,1,1,7,1,1,2,1,2,1,2,3,3,
-    1,2,2,3,6,6,1,1,2,3,1,2,2,4,4,1,
-    2,1,2,1,1,3,3,3,2,1,9,3,2,4,2,3,
-    2,24,1,2,1,3,1,3,4,1,2,6,3,2,3,3,
-    4,1,1,3,3,4,2,3,3,8,2
-};
-
 uint32_t readU32(const std::vector<uint8_t>& b,size_t off){
     uint32_t v=0; std::memcpy(&v,b.data()+off,sizeof(v)); return v;
 }
@@ -55,7 +46,7 @@ DscChart DscChart::Parse(const std::vector<uint8_t>& bytes,const std::wstring& s
     while(pos+4<=bytes.size()){
         const uint32_t opcode=readU32(bytes,pos); pos+=4;
         if(opcode>0x6A) break;
-        const int count=kParamCount[opcode];
+        const int count=DscCommands::kParamCount[opcode];
         const size_t need=static_cast<size_t>(count)*4;
         if(pos+need>bytes.size()) break;
         std::array<int32_t,32> p{};
@@ -109,15 +100,9 @@ DscChart DscChart::Parse(const std::vector<uint8_t>& bytes,const std::wstring& s
         if(i>0 && out.groups[i-1].slideMask) nearPrev=(out.groups[i].hitSeconds-out.groups[i-1].hitSeconds)<=chainGap;
         if(i+1<out.groups.size() && out.groups[i+1].slideMask) nearNext=(out.groups[i+1].hitSeconds-out.groups[i].hitSeconds)<=chainGap;
         if(nearPrev||nearNext) out.groups[i].chainMask|=out.groups[i].slideMask;
-        if(out.groups[i].chainMask && !nearNext) out.groups[i].chainEnd=true;
     }
     out.valid=!out.groups.empty();
     if(out.valid) Log::Info("Parsed DIVA DSC chart: "+std::to_string(out.groups.size())+" target groups, "+std::to_string(out.challengeMarkers.size())+" Challenge markers.");
     return out;
 }
 
-bool DscChart::ChallengeAt(double chartSeconds) const{
-    bool active=false;
-    for(const auto&m:challengeMarkers){if(m.seconds>chartSeconds)break;active=m.start;}
-    return active;
-}

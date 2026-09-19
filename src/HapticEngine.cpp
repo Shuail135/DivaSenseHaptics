@@ -95,16 +95,15 @@ void HapticEngine::voiceSample(const Voice& v, float& l, float& r) const {
     case HapticEvent::Multi2:
     case HapticEvent::Multi3:
     case HapticEvent::Multi4: {
-        int n=popcount4(v.detail);
-        // The event carries the inferred 2/3/4-note count. Do not collapse
-        // Multi3/Multi4 to Multi2 just because there is no raw HID mask.
-        if(n<2) n = (v.event==HapticEvent::Multi4 ? 4 : (v.event==HapticEvent::Multi3 ? 3 : 2));
+        // The confirmed event determines strength. A partial physical mask from
+        // a macro or a late HID report must not downgrade a three/four-note chord.
+        const int n=v.event==HapticEvent::Multi4 ? 4 : (v.event==HapticEvent::Multi3 ? 3 : 2);
         duration=(n==2?.075:(n==3?.085:.095));
         static constexpr double freq[4]={142.0,164.0,188.0,211.0};
         static constexpr float leftPan[4]={1.00f,.82f,.58f,.78f};
         static constexpr float rightPan[4]={.58f,.82f,1.00f,.78f};
         float sl=0,sr=0;
-        uint8_t mask=v.detail?v.detail:static_cast<uint8_t>((1u<<n)-1u);
+        const uint8_t mask=popcount4(v.detail)==n ? v.detail : static_cast<uint8_t>((1u<<n)-1u);
         for(int i=0;i<4;i++) if(mask&(1u<<i)) {
             float tone=sine(freq[i],t); sl+=tone*leftPan[i]; sr+=tone*rightPan[i];
         }

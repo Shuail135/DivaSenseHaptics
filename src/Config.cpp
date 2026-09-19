@@ -132,8 +132,6 @@ ModConfig ModConfig::Load(const std::filesystem::path& path) {
     c.effects.challengeNoteMultiplier = fl("effects.challenge_note_multiplier", c.effects.challengeNoteMultiplier);
 
     c.judgement.enabled = b("judgement.enabled", c.judgement.enabled);
-    c.judgement.strictValidation = b("judgement.strict_validation", c.judgement.strictValidation);
-    c.judgement.pressPreviewGain = fl("judgement.press_preview_gain", c.judgement.pressPreviewGain);
     c.judgement.coolGain = fl("judgement.cool_gain", c.judgement.coolGain);
     c.judgement.fineGain = fl("judgement.fine_gain", c.judgement.fineGain);
     c.judgement.safeGain = fl("judgement.safe_gain", c.judgement.safeGain);
@@ -146,10 +144,10 @@ ModConfig ModConfig::Load(const std::filesystem::path& path) {
     c.judgement.gameplayPollTimeoutMs = i("judgement.gameplay_poll_timeout_ms", c.judgement.gameplayPollTimeoutMs);
     c.judgement.multiGroupWindowMs = i("judgement.multi_group_window_ms", c.judgement.multiGroupWindowMs);
     c.judgement.physicalMultiWindowMs = i("judgement.physical_multi_window_ms", c.judgement.physicalMultiWindowMs);
-    c.judgement.targetCorrelationWindowMs = i("judgement.target_correlation_window_ms", c.judgement.targetCorrelationWindowMs);
     c.judgement.logEvents = b("judgement.log_events", c.judgement.logEvents);
 
     c.menu.enabled = b("menu.enabled", c.menu.enabled);
+    c.menu.visualValidation = b("menu.visual_validation", c.menu.visualValidation);
     c.menu.navGain = fl("menu.nav_gain", c.menu.navGain);
     c.menu.confirmGain = fl("menu.confirm_gain", c.menu.confirmGain);
     c.menu.validationWindowMs = i("menu.validation_window_ms", c.menu.validationWindowMs);
@@ -170,13 +168,6 @@ ModConfig ModConfig::Load(const std::filesystem::path& path) {
     c.menu.logEvents = b("menu.log_events", c.menu.logEvents);
 
     c.challenge.enabled = b("challenge.enabled", c.challenge.enabled);
-    c.challenge.visualDetection = b("challenge.visual_detection", c.challenge.visualDetection);
-    c.challenge.sampleIntervalMs = i("challenge.sample_interval_ms", c.challenge.sampleIntervalMs);
-    c.challenge.darkThreshold = fl("challenge.dark_threshold", c.challenge.darkThreshold);
-    c.challenge.centerMinimum = fl("challenge.center_minimum", c.challenge.centerMinimum);
-    c.challenge.contrastMinimum = fl("challenge.contrast_minimum", c.challenge.contrastMinimum);
-    c.challenge.enterSamples = i("challenge.enter_samples", c.challenge.enterSamples);
-    c.challenge.exitSamples = i("challenge.exit_samples", c.challenge.exitSamples);
 
     return c;
 }

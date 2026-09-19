@@ -13,7 +13,6 @@ if(WIN32)
         src/DualSenseHid.cpp
         src/DualSenseAudio.cpp
         src/InputHaptics.cpp
-        src/ChallengeDetector.cpp
         src/JudgementHaptics.cpp
         src/JudgementHook.cpp
         src/MenuHaptics.cpp
@@ -86,6 +85,11 @@ if(DIVASENSE_BUILD_CORE_TESTS)
     )
     target_compile_features(DivaSenseCoreSmoke PRIVATE cxx_std_20)
     target_include_directories(DivaSenseCoreSmoke PRIVATE src)
+    if(WIN32)
+        target_sources(DivaSenseCoreSmoke PRIVATE src/MenuHaptics.cpp)
+        target_compile_definitions(DivaSenseCoreSmoke PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_link_libraries(DivaSenseCoreSmoke PRIVATE d3d11 dxgi)
+    endif()
     if(MSVC)
         target_compile_options(DivaSenseCoreSmoke PRIVATE /W4 /permissive- /EHsc)
         set_property(TARGET DivaSenseCoreSmoke PROPERTY

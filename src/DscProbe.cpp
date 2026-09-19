@@ -1,20 +1,11 @@
 #include "DscProbe.h"
+#include "DscCommands.h"
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <limits>
 
 namespace {
-constexpr int kParamCount[0x6B] = {
-    0,1,4,2,2,2,7,4,2,6,2,1,6,2,1,1,
-    3,2,3,5,5,4,4,5,2,0,2,4,2,2,1,21,
-    0,3,2,5,1,1,7,1,1,2,1,2,1,2,3,3,
-    1,2,2,3,6,6,1,1,2,3,1,2,2,4,4,1,
-    2,1,2,1,1,3,3,3,2,1,9,3,2,4,2,3,
-    2,24,1,2,1,3,1,3,4,1,2,6,3,2,3,3,
-    4,1,1,3,3,4,2,3,3,8,2
-};
-
 uint32_t readU32(std::span<const uint8_t> b, size_t off) {
     uint32_t v = 0;
     std::memcpy(&v, b.data() + off, sizeof(v));
@@ -52,7 +43,7 @@ std::optional<DscProbeCandidate> validateFromTime(std::span<const uint8_t> bytes
             ++commands;
             break;
         }
-        const int params = kParamCount[opcode];
+        const int params = DscCommands::kParamCount[opcode];
         const size_t need = static_cast<size_t>(params) * 4u;
         if(pos + need > hardEnd) return std::nullopt;
 

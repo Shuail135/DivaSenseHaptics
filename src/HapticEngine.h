@@ -32,7 +32,6 @@ public:
     // Produces LR haptic PCM at output sample rate, interleaved (2 floats/frame).
     void RenderBlock(float* outLR, uint32_t frames, uint32_t outputSampleRate);
 
-    size_t BufferedAudioFrames() const { return audio_.available(); }
 
 private:
     struct FilterState { float prevX=0, hp=0, lp=0; };

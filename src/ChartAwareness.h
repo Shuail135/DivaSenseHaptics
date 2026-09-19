@@ -25,7 +25,6 @@ public:
     void ClearChart();
     ChartJudgementMatch ObserveJudgement(TP when,bool slide,bool successNote);
     bool HasChart() const;
-    bool IsLocked() const;
 
 private:
     struct Obs { TP when{}; bool slide=false; bool success=false; };
@@ -40,7 +39,6 @@ private:
     bool locked_=false;
     double offset_=0.0; // wall seconds - chart seconds
     size_t lastIndex_=0;
-    TP lastMatched_{};
     std::optional<bool> challengeState_;
     int misses_=0;
 };

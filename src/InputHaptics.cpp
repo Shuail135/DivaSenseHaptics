@@ -23,9 +23,9 @@ InputHaptics::InputHaptics(HapticEngine& e,const ModConfig& c,JudgementHaptics* 
     :engine_(e),cfg_(c),judgement_(judgement),menuSubmit_(std::move(menuSubmit)){Reset();}
 
 void InputHaptics::clearGameplayState() {
-    prevFace_=prevSlide_=pendingNoteMask_=chainActive_=0;
-    notePending_=false; slidePending_={}; presses_={}; slideSince_={};
-    touchActive_=false; touchLastX_=0; touchDirection_=0; touchLastMove_={};
+    prevFace_=prevSlide_=pendingNoteMask_=0;
+    notePending_=false; slidePending_={};
+    touchActive_=false; touchLastX_=0; touchDirection_=0;
     engine_.SetHoldMask(0); engine_.SetChainMask(0);
     if(judgement_) {
         judgement_->UpdatePhysicalFace(0);
@@ -161,32 +161,27 @@ void InputHaptics::handleMenuInput(const uint8_t* d) {
     prevMenuConfirm_=confirm;
 }
 
-void InputHaptics::emitGameplay(HapticEvent event,float gain,uint8_t detail,bool slide) {
-    if(judgement_ && gain==1.0f) judgement_->Submit(event,detail,slide);
-    else engine_.Trigger(event,gain,detail);
-}
-
-void InputHaptics::flushNotePending(TP now,bool force) {
+void InputHaptics::flushNotePending(TP now) {
     if(!notePending_)return;
     const auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-notePendingSince_).count();
-    if(!force && ms<cfg_.input.multiWindowMs)return;
+    if(ms<cfg_.input.multiWindowMs)return;
     const int n=bitCount(pendingNoteMask_);
-    if(n>=4)emitGameplay(HapticEvent::Multi4,1.0f,pendingNoteMask_);
-    else if(n==3)emitGameplay(HapticEvent::Multi3,1.0f,pendingNoteMask_);
-    else if(n==2)emitGameplay(HapticEvent::Multi2,1.0f,pendingNoteMask_);
+    if(n>=4)judgement_->Submit(HapticEvent::Multi4,pendingNoteMask_);
+    else if(n==3)judgement_->Submit(HapticEvent::Multi3,pendingNoteMask_);
+    else if(n==2)judgement_->Submit(HapticEvent::Multi2,pendingNoteMask_);
     else if(n==1) {
-        if(pendingNoteMask_&N_SQUARE)emitGameplay(HapticEvent::Square,1.0f,pendingNoteMask_);
-        else if(pendingNoteMask_&N_CROSS)emitGameplay(HapticEvent::Cross,1.0f,pendingNoteMask_);
-        else if(pendingNoteMask_&N_CIRCLE)emitGameplay(HapticEvent::Circle,1.0f,pendingNoteMask_);
-        else emitGameplay(HapticEvent::Triangle,1.0f,pendingNoteMask_);
+        if(pendingNoteMask_&N_SQUARE)judgement_->Submit(HapticEvent::Square,pendingNoteMask_);
+        else if(pendingNoteMask_&N_CROSS)judgement_->Submit(HapticEvent::Cross,pendingNoteMask_);
+        else if(pendingNoteMask_&N_CIRCLE)judgement_->Submit(HapticEvent::Circle,pendingNoteMask_);
+        else judgement_->Submit(HapticEvent::Triangle,pendingNoteMask_);
     }
     notePending_=false;pendingNoteMask_=0;
 }
 
-void InputHaptics::flushSlidePending(TP now,bool force) {
+void InputHaptics::flushSlidePending(TP now) {
     if(!slidePending_.active)return;
     auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-slidePending_.since).count();
-    if(!force && ms<cfg_.input.slideWindowMs)return;
+    if(ms<cfg_.input.slideWindowMs)return;
 
     uint8_t a=slidePending_.actions;
     int leftCount=((a&S_LSL)?1:0)+((a&S_RSL)?1:0)+((a&S_L1)?1:0)+((a&S_L2)?1:0);
@@ -195,81 +190,37 @@ void InputHaptics::flushSlidePending(TP now,bool force) {
     const bool leftStickLeft=a&S_LSL, leftStickRight=a&S_LSR;
     const bool rightStickLeft=a&S_RSL, rightStickRight=a&S_RSR;
 
-    if(leftCount>=2 && rightCount==0) emitGameplay(HapticEvent::SlideDoubleLeft,1.0f,0,true);
-    else if(rightCount>=2 && leftCount==0) emitGameplay(HapticEvent::SlideDoubleRight,1.0f,0,true);
-    else if(leftStickLeft && rightStickRight) emitGameplay(HapticEvent::SlideOutward,1.0f,0,true);
-    else if(leftStickRight && rightStickLeft) emitGameplay(HapticEvent::SlideInward,1.0f,0,true);
-    else if(leftCount && rightCount) emitGameplay(HapticEvent::SlideMixed,1.0f,0,true);
-    else if(leftCount) emitGameplay(HapticEvent::SlideLeft,1.0f,0,true);
-    else if(rightCount) emitGameplay(HapticEvent::SlideRight,1.0f,0,true);
+    if(leftCount>=2 && rightCount==0) judgement_->Submit(HapticEvent::SlideDoubleLeft,0,true);
+    else if(rightCount>=2 && leftCount==0) judgement_->Submit(HapticEvent::SlideDoubleRight,0,true);
+    else if(leftStickLeft && rightStickRight) judgement_->Submit(HapticEvent::SlideOutward,0,true);
+    else if(leftStickRight && rightStickLeft) judgement_->Submit(HapticEvent::SlideInward,0,true);
+    else if(leftCount && rightCount) judgement_->Submit(HapticEvent::SlideMixed,0,true);
+    else if(leftCount) judgement_->Submit(HapticEvent::SlideLeft,0,true);
+    else if(rightCount) judgement_->Submit(HapticEvent::SlideRight,0,true);
 
     slidePending_={};
 }
 
-void InputHaptics::updateHoldsFallback(uint8_t face,TP now) {
-    uint8_t holdMask=0;
-    for(int i=0;i<4;i++) {
-        const uint8_t bit=1u<<i;
-        bool down=(face&bit)!=0;
-        auto& p=presses_[i];
-        if(down && !p.down) {p.down=true;p.holdActive=false;p.since=now;}
-        if(!down && p.down) {
-            if(p.holdActive)engine_.Trigger(HapticEvent::HoldRelease);
-            p={};
-        }
-        if(down && p.down && !p.holdActive) {
-            auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-p.since).count();
-            if(ms>=cfg_.input.holdStartMs) {p.holdActive=true;engine_.Trigger(HapticEvent::HoldStart);}
-        }
-        if(p.holdActive)holdMask|=bit;
-    }
-    engine_.SetHoldMask(holdMask);
-}
-
-void InputHaptics::updateChainsFallback(uint8_t slide,TP now) {
-    uint8_t sides=0;
-    const bool anyLeft=(slide&S_LEFT_MASK)!=0;
-    const bool anyRight=(slide&S_RIGHT_MASK)!=0;
-    for(int side=0;side<2;side++) {
-        bool down=side==0?anyLeft:anyRight;
-        uint8_t bit=1u<<side;
-        if(down && !(prevSlide_ & (side==0?S_LEFT_MASK:S_RIGHT_MASK)))
-            slideSince_[side]=now;
-        if(down) {
-            auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-slideSince_[side]).count();
-            if(ms>=cfg_.input.chainStartMs)sides|=bit;
-        }
-    }
-    chainActive_=sides;
-    engine_.SetChainMask(sides);
-}
-
-void InputHaptics::updateTouch(const uint8_t* d,size_t size,TP now) {
+void InputHaptics::updateTouch(const uint8_t* d,size_t size) {
     if(!cfg_.input.touchpadAsSlides || size<41)return;
     bool active=(d[33]&0x80)==0;
     int x=d[34]|((d[35]&0x0f)<<8);
     if(active && !touchActive_) {
-        touchActive_=true;touchLastX_=x;touchDirection_=0;touchLastMove_=now;
+        touchActive_=true;touchLastX_=x;touchDirection_=0;
     } else if(active && touchActive_) {
         int dx=x-touchLastX_;
         if(std::abs(dx)>=cfg_.input.touchSwipePixels) {
             touchDirection_=dx<0?-1:1;
-            emitGameplay(dx<0?HapticEvent::SlideLeft:HapticEvent::SlideRight,1.0f,0,true);
-            touchLastX_=x;touchLastMove_=now;
-        }
-        if(!judgement_) {
-            auto since=std::chrono::duration_cast<std::chrono::milliseconds>(now-touchLastMove_).count();
-            if(touchDirection_ && since<120)
-                engine_.SetChainMask(static_cast<uint8_t>(chainActive_ | (touchDirection_<0?1:2)));
+            judgement_->Submit(dx<0?HapticEvent::SlideLeft:HapticEvent::SlideRight,0,true);
+            touchLastX_=x;
         }
     } else if(!active && touchActive_) {
         touchActive_=false;touchDirection_=0;
-        if(!judgement_)engine_.SetChainMask(chainActive_);
     }
 }
 
 void InputHaptics::OnUsbReport(const uint8_t* d,size_t size) {
-    if(!cfg_.input.enabled || !d || size<11 || d[0]!=0x01)return;
+    if(!judgement_ || !cfg_.input.enabled || !d || size<11 || d[0]!=0x01)return;
 
     // In the real mod a valid judgement hook is the authority that separates
     // gameplay from UI/loading. If it is unavailable, strict mode intentionally
@@ -279,7 +230,7 @@ void InputHaptics::OnUsbReport(const uint8_t* d,size_t size) {
         return;
     }
 
-    const bool gameplay = judgement_ ? judgement_->InGameplay() : true;
+    const bool gameplay = judgement_->InGameplay();
     if(!modeKnown_ || gameplay!=wasGameplay_) {
         modeKnown_=true;wasGameplay_=gameplay;
         primeModeState(d,size,gameplay);
@@ -304,7 +255,6 @@ void InputHaptics::OnUsbReport(const uint8_t* d,size_t size) {
         else pendingNoteMask_|=rising;
     }
     if(judgement_) judgement_->UpdatePhysicalFace(face);
-    else updateHoldsFallback(face,now);
 
     uint8_t slide=slideActions(d);
     uint8_t slideRise=static_cast<uint8_t>(slide&~prevSlide_);
@@ -312,8 +262,7 @@ void InputHaptics::OnUsbReport(const uint8_t* d,size_t size) {
         if(!slidePending_.active)slidePending_={slideRise,now,true};
         else slidePending_.actions|=slideRise;
     }
-    if(!judgement_)updateChainsFallback(slide,now);
-    updateTouch(d,size,now);
+    updateTouch(d,size);
 
     if(judgement_) {
         uint8_t sides=slideSideMask(slide);

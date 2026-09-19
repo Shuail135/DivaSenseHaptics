@@ -15,13 +15,13 @@ public:
     ~DualSenseHid(){Stop();}
     bool Start(ReportCallback cb);
     void Stop();
-    bool Running()const{return running_.load();}
     bool HasRecentInput(unsigned maxAgeMs=500) const;
 private:
     void threadMain();
     bool openController();
     void closeController();
-    bool sendAudioHapticsEnable();
+    bool sendAudioHapticsEnable(unsigned long& error);
+    bool useSetOutputReport_=false;
 
     ModConfig cfg_;
     ReportCallback callback_;

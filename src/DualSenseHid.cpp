@@ -75,10 +75,11 @@ bool DualSenseHid::openController() {
                 FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,nullptr);
             if(input==INVALID_HANDLE_VALUE)continue;
             HANDLE control=CreateFileW(detail->DevicePath,GENERIC_WRITE,
-                FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
+                FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,nullptr);
 
             inputHandle_=input;
             controlHandle_=control;
+            useSetOutputReport_=false;
             lastInputTick_.store(0,std::memory_order_release);
             found=true;
             Log::Info(attr.ProductID==DS5_EDGE?"DualSense Edge USB HID input opened.":"DualSense USB HID input opened.");
@@ -100,9 +101,10 @@ void DualSenseHid::closeController(){
     controlHandle_=reinterpret_cast<void*>(-1);
     lastInputTick_.store(0,std::memory_order_release);
 }
-bool DualSenseHid::sendAudioHapticsEnable(){
+bool DualSenseHid::sendAudioHapticsEnable(unsigned long& error){
     HANDLE h=reinterpret_cast<HANDLE>(controlHandle_);
-    if(h==INVALID_HANDLE_VALUE)return false;
+    error=ERROR_SUCCESS;
+    if(h==INVALID_HANDLE_VALUE){error=ERROR_INVALID_HANDLE;return false;}
     std::vector<unsigned char> report(std::max(48u,outputReportBytes_),0);
     report[0]=0x02;
     // valid_flag0 bit 0 = COMPATIBLE_VIBRATION. With zero motor values and
@@ -111,7 +113,38 @@ bool DualSenseHid::sendAudioHapticsEnable(){
     report[1]=0x01;
     report[3]=0x00; // right compatibility motor
     report[4]=0x00; // left compatibility motor
-    return HidD_SetOutputReport(h,report.data(),static_cast<ULONG>(report.size()))!=FALSE;
+    // Continuous output belongs on the HID interrupt/output path. Some drivers
+    // only support SetOutputReport, so retain it as a compatibility fallback.
+    if(!useSetOutputReport_){
+        OVERLAPPED write{};
+        write.hEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        if(!write.hEvent){error=GetLastError();return false;}
+        DWORD written=0;
+        BOOL ok=WriteFile(h,report.data(),static_cast<DWORD>(report.size()),&written,&write);
+        if(!ok && GetLastError()==ERROR_IO_PENDING){
+            if(WaitForSingleObject(write.hEvent,100)==WAIT_OBJECT_0){
+                ok=GetOverlappedResult(h,&write,&written,FALSE);
+            }else{
+                CancelIoEx(h,&write);
+                // Keep the buffer, event and OVERLAPPED alive until cancellation completes.
+                GetOverlappedResult(h,&write,&written,TRUE);
+                CloseHandle(write.hEvent);
+                error=ERROR_TIMEOUT;
+                return false;
+            }
+        }
+        const DWORD writeError=ok ? ERROR_WRITE_FAULT : GetLastError();
+        CloseHandle(write.hEvent);
+        if(ok && written==report.size())return true;
+        error=writeError;
+    }
+    if(HidD_SetOutputReport(h,report.data(),static_cast<ULONG>(report.size()))){
+        useSetOutputReport_=true;
+        return true;
+    }
+    error=GetLastError();
+    useSetOutputReport_=false;
+    return false;
 }
 
 void DualSenseHid::threadMain(){
@@ -153,16 +186,10 @@ void DualSenseHid::threadMain(){
         // HID input and the best-effort output/control path are independent.
         // Never tear down a healthy input stream just because a control packet
         // is rejected by Windows/Steam/the controller firmware.
-        bool controlAvailable=reinterpret_cast<HANDLE>(controlHandle_)!=INVALID_HANDLE_VALUE;
+        const bool controlAvailable=reinterpret_cast<HANDLE>(controlHandle_)!=INVALID_HANDLE_VALUE;
         bool controlFailureLogged=false;
         auto lastUnmute=std::chrono::steady_clock::now()-std::chrono::seconds(1);
-        if(cfg_.controller.forceAudioHaptics && controlAvailable) {
-            if(!sendAudioHapticsEnable()) {
-                Log::Warn("DualSense audio-haptics control packet was rejected; continuing with HID input and USB audio output.");
-                controlFailureLogged=true;
-                controlAvailable=false;
-            }
-        }
+        bool controlConfirmed=false;
 
         bool disconnected=false;
         bool firstReport=true;
@@ -230,15 +257,22 @@ void DualSenseHid::threadMain(){
             if(cfg_.controller.forceAudioHaptics && controlAvailable && !disconnected) {
                 const auto now=std::chrono::steady_clock::now();
                 if(std::chrono::duration_cast<std::chrono::milliseconds>(now-lastUnmute).count()>=
-                   std::max(10,cfg_.controller.unmuteIntervalMs)) {
-                    if(!sendAudioHapticsEnable()) {
+                   (controlFailureLogged ? 1000 : std::max(10,cfg_.controller.unmuteIntervalMs))) {
+                    unsigned long error=ERROR_SUCCESS;
+                    if(!sendAudioHapticsEnable(error)) {
                         // Do not poison the read path. We can still receive
                         // buttons and the separate WASAPI endpoint can still
                         // carry haptic audio.
                         if(!controlFailureLogged)
-                            Log::Warn("DualSense audio-haptics control writes became unavailable; HID input remains online.");
+                            Log::Warn("DualSense audio-haptics control failed (Win32 error " + std::to_string(error) +
+                                      "); retrying every second. HID input and USB audio remain active, but controller haptics mode is unconfirmed.");
                         controlFailureLogged=true;
-                        controlAvailable=false;
+                    }else{
+                        if(!controlConfirmed || controlFailureLogged)
+                            Log::Info(std::string("DualSense audio-haptics control accepted via ")+
+                                      (useSetOutputReport_ ? "SetOutputReport." : "WriteFile."));
+                        controlConfirmed=true;
+                        controlFailureLogged=false;
                     }
                     lastUnmute=now;
                 }

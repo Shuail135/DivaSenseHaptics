@@ -1,5 +1,4 @@
 #ifdef _WIN32
-#include "ChallengeDetector.h"
 #include "ChartAwareness.h"
 #include "ChartCapture.h"
 #include "ChartMemoryScan.h"
@@ -23,6 +22,7 @@
 #include <filesystem>
 #include <chrono>
 #include <memory>
+#include <mutex>
 
 namespace {
 HMODULE gModule=nullptr;
@@ -51,9 +51,9 @@ struct App {
     std::unique_ptr<DualSenseHid> hid;
     std::unique_ptr<DualSenseAudio> output;
     std::unique_ptr<ProcessLoopback> capture;
-    std::unique_ptr<ChallengeDetector> challenge;
     std::atomic<bool> initialized{false};
     bool wasGameplay=false;
+    std::mutex inputMutex;
     std::chrono::steady_clock::time_point lastMemoryScanRequest{};
 
     using XInputGetStateFn=DWORD (WINAPI*)(DWORD,XINPUT_STATE*);
@@ -83,10 +83,9 @@ struct App {
     }
 
     void pollXInputFallback(){
+        std::lock_guard lock(inputMutex);
         if(!input)return;
-        // Raw USB HID is preferred because it gives us the touchpad and the
-        // controller's native layout. Only use XInput when raw reports are not
-        // arriving (for example when Steam/game access prevents our HID read).
+        // Raw USB HID, XInput fall back
         if(hid && hid->HasRecentInput(350))return;
         if(!xinputGetState)initXInput();
         if(!xinputGetState)return;
@@ -147,7 +146,7 @@ struct App {
         if(initialized.exchange(true))return;
         const auto modDir=moduleDirectory();
         Log::Init(modDir / "DualSenseHaptics.log");
-        Log::Info("DivaSenseHaptics 0.1.0 starting (DSC chart-aware notes/macros + memory fallback + strict confirmed haptics).");
+        Log::Info("DivaSenseHaptics 0.1.0 starting (judgement cleanup, mixed-chord fix, HID output recovery).");
         cfg=ModConfig::Load(modDir / "haptics.ini");
         engine.Configure(cfg);
 
@@ -171,7 +170,7 @@ struct App {
 
         if(cfg.controller.enabled){
             hid=std::make_unique<DualSenseHid>(cfg);
-            if(!hid->Start([this](const unsigned char* d,size_t n){if(input)input->OnUsbReport(d,n);}))
+            if(!hid->Start([this](const unsigned char* d,size_t n){std::lock_guard lock(inputMutex);if(input)input->OnUsbReport(d,n);}))
                 Log::Warn("USB HID input unavailable; music haptics can still work if the audio endpoint is available.");
         }
 
@@ -180,20 +179,14 @@ struct App {
             Log::Warn("DualSense haptic audio endpoint is not ready yet; the output thread will keep retrying for USB reconnect.");
 
         if(cfg.audio.enabled){
-            capture=std::make_unique<ProcessLoopback>(engine,cfg);
+            capture=std::make_unique<ProcessLoopback>(engine);
             if(!capture->Start(GetCurrentProcessId()))Log::Error("Mega Mix+ process audio capture failed to start.");
         }
-        challenge=std::make_unique<ChallengeDetector>(engine,cfg,judgement.get());
-        if(cfg.challenge.enabled && !cfg.challenge.visualDetection)
-            Log::Info("Challenge Time visual heuristic is disabled (safe default; prevents false START/END detections).");
-        else if(cfg.challenge.enabled && cfg.challenge.visualDetection)
-            Log::Warn("Experimental Challenge Time visual detection is enabled and may false-positive on PV transitions.");
         std::atexit([]{GetApp().shutdown();});
     }
     void d3dInit(IDXGISwapChain* s,ID3D11Device* d,ID3D11DeviceContext* c){
         if(!initialized)init();
         if(menu)menu->Init(s,d,c);
-        if(challenge)challenge->Init(s,d,c);
     }
     void frame(IDXGISwapChain* s){
         pollXInputFallback();
@@ -216,7 +209,6 @@ struct App {
         }
 
         if(menu)menu->Tick(s);
-        if(challenge)challenge->Tick(s);
     }
     void shutdown(){
         if(!initialized.exchange(false))return;
@@ -227,7 +219,7 @@ struct App {
         if(capture){capture->Stop();capture.reset();}
         if(output){output->Stop();output.reset();}
         if(hid){hid->Stop();hid.reset();}
-        challenge.reset();menu.reset();input.reset();judgement.reset();chart.reset();
+        menu.reset();input.reset();judgement.reset();chart.reset();
         if(xinputModule){FreeLibrary(xinputModule);xinputModule=nullptr;xinputGetState=nullptr;}
         Log::Info("DivaSenseHaptics stopped.");
     }

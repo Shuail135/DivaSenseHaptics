@@ -12,7 +12,6 @@ struct DscChartGroup {
     uint8_t chainMask = 0;
     uint8_t specialFaceMask = 0;
     uint8_t specialSlideMask = 0;
-    bool chainEnd = false;
     bool challenge = false;
 };
 
@@ -29,5 +28,4 @@ struct DscChart {
 
     static DscChart Parse(const std::vector<uint8_t>& bytes, const std::wstring& sourcePath,
                           int groupWindowMs = 2, int chainGapMs = 130);
-    bool ChallengeAt(double chartSeconds) const;
 };
