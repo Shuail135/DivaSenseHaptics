@@ -6,6 +6,7 @@ Hatsune Miku Project diva mega mix + mod with PS5 dualsense controller
 
 Haptics response for music, and corresponding note press, menu selections. Only work with wired DualSense.
 Should work with other mods, I have download 100+ mods and no conflicts. Put this to piority if no effect.
+The code is written in AI, I am simply sharing a mod that do what I want.
 
 ## Requirements
 
