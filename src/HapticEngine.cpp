@@ -52,14 +52,14 @@ void HapticEngine::PushAudioFloatStereo(const float* p, uint32_t frames, uint32_
     }
 }
 
-void HapticEngine::Trigger(HapticEvent e, float gainScale, uint8_t detailMask) {
+void HapticEngine::Trigger(HapticEvent e, float gainScale) {
     const bool menuEvent = e==HapticEvent::MenuUp || e==HapticEvent::MenuDown ||
         e==HapticEvent::MenuLeft || e==HapticEvent::MenuRight || e==HapticEvent::MenuConfirm;
     if (challengeActive_.load(std::memory_order_acquire) && !menuEvent &&
         e!=HapticEvent::ChallengeStart && e!=HapticEvent::ChallengeEnd)
         gainScale *= cfg_.effects.challengeNoteMultiplier;
     std::lock_guard lock(voicesMutex_);
-    voices_.push_back({e,0.0,gainScale,static_cast<uint8_t>(detailMask&0x0f)});
+    voices_.push_back({e,0.0,gainScale});
     if (voices_.size() > 64) voices_.erase(voices_.begin(), voices_.begin()+16);
 }
 
@@ -95,23 +95,16 @@ void HapticEngine::voiceSample(const Voice& v, float& l, float& r) const {
     case HapticEvent::Multi2:
     case HapticEvent::Multi3:
     case HapticEvent::Multi4: {
-        // The confirmed event determines strength. A partial physical mask from
-        // a macro or a late HID report must not downgrade a three/four-note chord.
         const int n=v.event==HapticEvent::Multi4 ? 4 : (v.event==HapticEvent::Multi3 ? 3 : 2);
         duration=(n==2?.075:(n==3?.085:.095));
         static constexpr double freq[4]={142.0,164.0,188.0,211.0};
         static constexpr float leftPan[4]={1.00f,.82f,.58f,.78f};
         static constexpr float rightPan[4]={.58f,.82f,1.00f,.78f};
-        float sl=0,sr=0;
-        const uint8_t mask=popcount4(v.detail)==n ? v.detail : static_cast<uint8_t>((1u<<n)-1u);
-        for(int i=0;i<4;i++) if(mask&(1u<<i)) {
-            float tone=sine(freq[i],t); sl+=tone*leftPan[i]; sr+=tone*rightPan[i];
+        float sl=0.0f,sr=0.0f;
+        for(int i=0;i<4;i++) {
+            const float tone=sine(freq[i],t); sl+=tone*leftPan[i]; sr+=tone*rightPan[i];
         }
-        // Preserve more total energy as chord size grows. The old 1/N
-        // normalization made 2/3/4-note chords converge perceptually once the
-        // final limiter engaged. 1/sqrt(N) keeps them controlled while making
-        // larger chords physically broader/heavier.
-        const float norm=1.0f/std::sqrt(static_cast<float>(std::max(1,popcount4(mask))));
+        const float norm=1.0f/std::sqrt(static_cast<float>(n));
         const float bodyGain=n==2?.28f:(n==3?.42f:.58f);
         const float body=bodyGain*sine(n==2?104.0:(n==3?92.0:78.0),t);
         const float punch=(n>=3 ? .18f*sine(n==3?72.0:62.0,t)*envExp(t,24.0) : 0.0f);

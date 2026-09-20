@@ -13,12 +13,6 @@ class JudgementHaptics {
 public:
     enum class Grade { Cool, Fine, Safe, Sad, Wrong, Worst, None };
 
-    struct Decoded {
-        Grade grade = Grade::None;
-        int multiCount = 0;
-        bool valid = false;
-    };
-
     JudgementHaptics(HapticEngine& engine, const ModConfig& cfg, ChartAwareness* chart = nullptr);
 
     // Physical note/slide gestures are only candidates. In strict mode they do
@@ -34,7 +28,7 @@ public:
 
     // Called from the game's GetHitState hook.
     void OnGamePoll();
-    void OnJudgement(int32_t rawHitState, bool slide, bool slideChain,
+    void OnJudgement(Grade, bool slide, bool slideChain,
                      bool slideChainStart, bool slideChainMax,
                      bool slideChainContinues, bool successNote,
                      int reportedMultiCount);
@@ -44,7 +38,6 @@ public:
     bool InGameplay() const;
     void Tick();
 
-    static Decoded Decode(int32_t rawHitState, int reportedMultiCount = 0);
     static const char* GradeName(Grade grade);
 
 private:
@@ -57,50 +50,24 @@ private:
         bool slide = false;
         TP when{};
     };
-    struct FaceSample {
-        uint8_t mask = 0;
-        TP when{};
-    };
-    struct ConfirmBurst {
-        bool active = false;
-        Decoded decoded{};
-        Grade bodyGrade = Grade::None;
-        int32_t rawHitState = 21;
-        int callbackCount = 0;
-        int reportedMax = 1;
-        int hintedCount = 1;
-        Pending pending{};
-        bool havePending = false;
-        bool successNote = false;
-        TP first{};
-        TP last{};
-    };
 
-    static int bitCount(uint8_t v);
     static bool gradeAllowsSustain(Grade grade);
     static uint8_t slideSidesForEvent(HapticEvent event);
     bool inGameplayLocked(TP now) const;
     float gradeGain(Grade grade) const;
     HapticEvent gradeEvent(Grade grade) const;
-    int pendingCount(const Pending& p) const;
     void purgeLocked(TP now);
-    int physicalChordCountLocked(const ConfirmBurst& burst, uint8_t& maskOut) const;
-    int findPendingLocked(const Decoded& d, bool slide, TP now) const;
-    static HapticEvent eventForGameResult(const Pending* pending, const Decoded& decoded, bool gameSlide);
-    void playConfirmed(const Pending* pending, const Decoded& decoded, bool gameSlide);
+    int findPendingLocked(bool slide, TP now) const;
+    static HapticEvent eventForGameResult(const Pending* pending, int multiCount, bool gameSlide);
+    void playConfirmed(const Pending* pending, Grade grade, int multiCount, bool gameSlide);
     void playGradeOverlay(Grade grade);
-    bool takeBurstLocked(TP now, bool force, ConfirmBurst& out);
-    void emitBurst(const ConfirmBurst& burst);
 
     HapticEngine& engine_;
     ModConfig cfg_;
     ChartAwareness* chart_ = nullptr;
     mutable std::mutex mutex_;
     std::deque<Pending> pending_;
-    std::deque<FaceSample> faceSamples_;
-    ConfirmBurst burst_{};
     bool hookAvailable_ = false;
-    unsigned unknownResultLogs_ = 0;
     TP lastGamePoll_{};
 
     uint8_t physicalFaceMask_ = 0;

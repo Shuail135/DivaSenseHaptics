@@ -33,7 +33,7 @@ bool ChartCapture::Start(){
     const bool ha=HookImport(main,"CreateFileA",reinterpret_cast<void*>(&hookA),&oa);
     if(hw&&ow)gW=reinterpret_cast<CreateFileWFn>(ow);
     if(ha&&oa)gA=reinterpret_cast<CreateFileAFn>(oa);
-    if(!hw&&!ha){gCapture=nullptr;Log::Warn("DSC chart file hook could not be installed; chart-aware multi notes/Challenge Time will fall back to judgement/input detection.");return false;}
+    if(!hw&&!ha){gCapture=nullptr;Log::Warn("chart aware failed");return false;}
     stop_=false; thread_=std::thread(&ChartCapture::threadMain,this);
     Log::Info("DSC chart capture hook installed (CreateFileW/A).");
     return true;

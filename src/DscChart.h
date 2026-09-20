@@ -15,15 +15,9 @@ struct DscChartGroup {
     bool challenge = false;
 };
 
-struct DscChallengeMarker {
-    double seconds = 0.0;
-    bool start = false;
-};
-
 struct DscChart {
     std::wstring sourcePath;
     std::vector<DscChartGroup> groups;
-    std::vector<DscChallengeMarker> challengeMarkers;
     bool valid = false;
 
     static DscChart Parse(const std::vector<uint8_t>& bytes, const std::wstring& sourcePath,

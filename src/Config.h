@@ -68,14 +68,7 @@ struct ModConfig {
         float worstGain = 0.10f;
         float overlayGain = 0.42f;
         int matchWindowMs = 180;
-        int pendingTimeoutMs = 240;
         int gameplayPollTimeoutMs = 250;
-        // If Mega Mix+ emits near-simultaneous judgement callbacks, group them as a
-        // fallback chord signal. Physical confirmed chords normally use the HID history.
-        int multiGroupWindowMs = 6;
-        // How far around the confirmed judgement to look for the maximum
-        // simultaneous face-button mask. This removes the HID-vs-game timing race.
-        int physicalMultiWindowMs = 24;
         bool logEvents = false;
     } judgement;
 

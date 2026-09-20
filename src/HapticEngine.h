@@ -24,7 +24,7 @@ class HapticEngine {
 public:
     void Configure(const ModConfig& cfg);
     void PushAudioFloatStereo(const float* interleaved, uint32_t frames, uint32_t sampleRate);
-    void Trigger(HapticEvent e, float gainScale = 1.0f, uint8_t detailMask = 0);
+    void Trigger(HapticEvent e, float gainScale = 1.0f);
     void SetHoldMask(uint8_t mask);
     void SetChainMask(uint8_t mask); // bit0 left, bit1 right
     void SetChallengeActive(bool active);
@@ -35,7 +35,7 @@ public:
 
 private:
     struct FilterState { float prevX=0, hp=0, lp=0; };
-    struct Voice { HapticEvent event{}; double age=0.0; float gain=1.0f; uint8_t detail=0; };
+    struct Voice { HapticEvent event{}; double age=0.0; float gain=1.0f;};
 
     float filterSample(float x, FilterState& s, uint32_t sampleRate);
     static float softClip(float x, float drive);

@@ -39,7 +39,6 @@ void InputHaptics::Reset() {
     clearGameplayState();
 }
 
-int InputHaptics::bitCount(uint8_t v) { int n=0; while(v){n+=v&1;v>>=1;} return n; }
 
 uint8_t InputHaptics::physicalFaceMask(const uint8_t* d) const {
     const uint8_t b=d[8];
@@ -165,16 +164,19 @@ void InputHaptics::flushNotePending(TP now) {
     if(!notePending_)return;
     const auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-notePendingSince_).count();
     if(ms<cfg_.input.multiWindowMs)return;
-    const int n=bitCount(pendingNoteMask_);
-    if(n>=4)judgement_->Submit(HapticEvent::Multi4,pendingNoteMask_);
-    else if(n==3)judgement_->Submit(HapticEvent::Multi3,pendingNoteMask_);
-    else if(n==2)judgement_->Submit(HapticEvent::Multi2,pendingNoteMask_);
-    else if(n==1) {
-        if(pendingNoteMask_&N_SQUARE)judgement_->Submit(HapticEvent::Square,pendingNoteMask_);
-        else if(pendingNoteMask_&N_CROSS)judgement_->Submit(HapticEvent::Cross,pendingNoteMask_);
-        else if(pendingNoteMask_&N_CIRCLE)judgement_->Submit(HapticEvent::Circle,pendingNoteMask_);
-        else judgement_->Submit(HapticEvent::Triangle,pendingNoteMask_);
-    }
+    const uint8_t mask=static_cast<uint8_t>(pendingNoteMask_ & 0x0f);
+	HapticEvent event = HapticEvent::NoteGeneric;
+	
+	switch(mask) {
+		case N_SQUARE: event = HapticEvent::Square; break;
+		case N_CIRCLE: event = HapticEvent::Circle; break;
+		case N_TRIANGLE: event = HapticEvent::Triangle; break;
+		case N_CROSS: event = HapticEvent::Cross; break;
+		default: break;
+	}
+	
+    judgement_->Submit(event, mask, false);
+	
     notePending_=false;pendingNoteMask_=0;
 }
 

@@ -57,8 +57,8 @@ DscChart DscChart::Parse(const std::vector<uint8_t>& bytes,const std::wstring& s
         case 0x06: raw.push_back({currentSeconds+flyingMs/1000.0,p[0],challenge}); break;
         case 0x1A:
             if(p[0]==31){
-                if(p[1]==1){challenge=true;out.challengeMarkers.push_back({currentSeconds,true});}
-                else if(p[1]==3){challenge=false;out.challengeMarkers.push_back({currentSeconds,false});}
+                if(p[1]==1){challenge=true;}
+                else if(p[1]==3){challenge=false;}
             }
             break;
         case 0x1C:
@@ -74,7 +74,6 @@ DscChart DscChart::Parse(const std::vector<uint8_t>& bytes,const std::wstring& s
         }
         pos+=need;
     }
-    std::sort(out.challengeMarkers.begin(),out.challengeMarkers.end(),[](const auto&a,const auto&b){return a.seconds<b.seconds;});
     if(raw.empty()) return out;
     std::sort(raw.begin(),raw.end(),[](const auto&a,const auto&b){return a.hit<b.hit;});
     const double groupWindow=std::max(0,groupWindowMs)/1000.0;
@@ -102,7 +101,6 @@ DscChart DscChart::Parse(const std::vector<uint8_t>& bytes,const std::wstring& s
         if(nearPrev||nearNext) out.groups[i].chainMask|=out.groups[i].slideMask;
     }
     out.valid=!out.groups.empty();
-    if(out.valid) Log::Info("Parsed DIVA DSC chart: "+std::to_string(out.groups.size())+" target groups, "+std::to_string(out.challengeMarkers.size())+" Challenge markers.");
     return out;
 }
 

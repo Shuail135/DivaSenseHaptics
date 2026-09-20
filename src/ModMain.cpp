@@ -160,9 +160,9 @@ struct App {
         const bool judgementInstalled=cfg.judgement.enabled && judgementHook->Start();
         judgement->SetHookAvailable(judgementInstalled);
         if(judgementInstalled)
-            Log::Info("Gameplay haptics are judgement-driven; when a DSC chart is captured, chart TARGET groups determine exact 1/2/3/4-note, slide, Success-note and Challenge state independent of physical key/macros.");
+            Log::Info("inner judgement for grade");
         else if(cfg.judgement.enabled)
-            Log::Warn("Judgement hook unavailable; strict validation suppresses gameplay event haptics instead of guessing from raw input.");
+            Log::Warn("inner judgement for grade failed");
 
         menu=std::make_unique<MenuHaptics>(engine,cfg,judgement.get());
         input=std::make_unique<InputHaptics>(engine,cfg,judgement.get(),

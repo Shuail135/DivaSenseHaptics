@@ -140,10 +140,7 @@ ModConfig ModConfig::Load(const std::filesystem::path& path) {
     c.judgement.worstGain = fl("judgement.worst_gain", c.judgement.worstGain);
     c.judgement.overlayGain = fl("judgement.overlay_gain", c.judgement.overlayGain);
     c.judgement.matchWindowMs = i("judgement.match_window_ms", c.judgement.matchWindowMs);
-    c.judgement.pendingTimeoutMs = i("judgement.pending_timeout_ms", c.judgement.pendingTimeoutMs);
     c.judgement.gameplayPollTimeoutMs = i("judgement.gameplay_poll_timeout_ms", c.judgement.gameplayPollTimeoutMs);
-    c.judgement.multiGroupWindowMs = i("judgement.multi_group_window_ms", c.judgement.multiGroupWindowMs);
-    c.judgement.physicalMultiWindowMs = i("judgement.physical_multi_window_ms", c.judgement.physicalMultiWindowMs);
     c.judgement.logEvents = b("judgement.log_events", c.judgement.logEvents);
 
     c.menu.enabled = b("menu.enabled", c.menu.enabled);

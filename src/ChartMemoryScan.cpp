@@ -100,6 +100,9 @@ bool ChartMemoryScan::scanOnce() {
     size_t regions = 0;
     size_t readableBytes = 0;
 
+	std::vector<uint8_t> buf;
+	buf.reserve(static_cast<size_t>(kWindow));
+
     while(address < maximum && !stop_) {
         MEMORY_BASIC_INFORMATION mbi{};
         if(VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi)) break;
@@ -114,7 +117,7 @@ bool ChartMemoryScan::scanOnce() {
             for(SIZE_T rel = 0; rel < regionSize && !stop_; rel += kStep) {
                 const SIZE_T want = std::min<SIZE_T>(kWindow, regionSize - rel);
                 if(want < 64) break;
-                std::vector<uint8_t> buf(static_cast<size_t>(want));
+                buf.resize(static_cast<size_t>(want));
                 SIZE_T got = 0;
                 if(!ReadProcessMemory(process, reinterpret_cast<const void*>(base + rel),
                                       buf.data(), want, &got) || got < 64) {

@@ -32,7 +32,6 @@ private:
         bool active=false;
     };
 
-    static int bitCount(uint8_t v);
     uint8_t physicalFaceMask(const uint8_t* d) const;
     uint8_t logicalFaceMask(const uint8_t* d) const;
     uint8_t slideActions(const uint8_t* d) const;

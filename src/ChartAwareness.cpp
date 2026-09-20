@@ -67,8 +67,7 @@ bool ChartAwareness::tryLockLocked(ChartJudgementMatch& latest){
     offset_=sum/static_cast<double>(bestIndices.size());
     locked_=true; lastIndex_=bestIndices.back(); misses_=0;
     challengeState_=chart_.groups[lastIndex_].challenge;
-    latest.chartAvailable=true; latest.locked=true; latest.matched=true; latest.group=chart_.groups[lastIndex_]; latest.groupIndex=static_cast<int>(lastIndex_);
-    latest.timingErrorMs=(seconds(obs.back().when)-offset_-latest.group.hitSeconds)*1000.0;
+    latest.matched=true; latest.group=chart_.groups[lastIndex_];
     latest.challengeActive=latest.group.challenge;
     Log::Info("DSC chart timing locked; average residual="+std::to_string(bestAvg*1000.0)+" ms, group="+std::to_string(lastIndex_)+".");
     return true;
@@ -93,7 +92,6 @@ std::optional<size_t> ChartAwareness::findLockedMatchLocked(const Obs&o,double p
 ChartJudgementMatch ChartAwareness::ObserveJudgement(TP when,bool slide,bool successNote){
     ChartJudgementMatch out;
     std::lock_guard lock(mutex_);
-    out.chartAvailable=chart_.valid; out.locked=locked_;
     if(!chart_.valid) return out;
     Obs o{when,slide,successNote};
     recent_.push_back(o); while(recent_.size()>10)recent_.pop_front();
@@ -112,7 +110,6 @@ ChartJudgementMatch ChartAwareness::ObserveJudgement(TP when,bool slide,bool suc
             Log::Warn("DSC chart timing lost; relocking from confirmed judgements.");
             tryLockLocked(out);
         }
-        out.locked=locked_;
         return out;
     }
 
@@ -120,8 +117,7 @@ ChartJudgementMatch ChartAwareness::ObserveJudgement(TP when,bool slide,bool suc
     const auto&g=chart_.groups[*idx];
     const double measured=seconds(when)-g.hitSeconds;
     offset_=offset_*0.94+measured*0.06;
-    out.locked=true; out.matched=true; out.group=g; out.groupIndex=static_cast<int>(*idx);
-    out.timingErrorMs=(seconds(when)-offset_-g.hitSeconds)*1000.0;
+    out.matched=true; out.group=g;
     out.challengeActive=g.challenge;
     if(challengeState_.has_value() && *challengeState_!=g.challenge) out.challengeTransition=true;
     challengeState_=g.challenge;

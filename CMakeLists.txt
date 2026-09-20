@@ -1,9 +1,18 @@
 cmake_minimum_required(VERSION 3.24)
-project(DivaSenseHaptics VERSION 0.1.0 LANGUAGES CXX)
+project(DivaSenseHaptics VERSION 0.1.0 LANGUAGES C CXX)
 
 option(DIVASENSE_BUILD_CORE_TESTS "Build portable core smoke tests" OFF)
 
 if(WIN32)
+	include(FetchContent)
+
+    FetchContent_Declare(
+        minhook
+        URL https://github.com/TsudaKageyu/minhook/archive/refs/tags/v1.3.4.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+
+    FetchContent_MakeAvailable(minhook)
     add_library(DivaSenseHaptics SHARED
         src/ModMain.cpp
         src/Log.cpp
@@ -34,6 +43,7 @@ if(WIN32)
     target_include_directories(DivaSenseHaptics PRIVATE src)
 
     target_link_libraries(DivaSenseHaptics PRIVATE
+		minhook
         ole32
         mmdevapi
         avrt

@@ -6,12 +6,8 @@
 #include <optional>
 
 struct ChartJudgementMatch {
-    bool chartAvailable=false;
-    bool locked=false;
     bool matched=false;
     DscChartGroup group{};
-    int groupIndex=-1;
-    double timingErrorMs=0.0;
     bool challengeTransition=false;
     bool challengeActive=false;
 };

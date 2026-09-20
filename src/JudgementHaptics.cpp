@@ -3,18 +3,13 @@
 #include "Log.h"
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <limits>
 
 JudgementHaptics::JudgementHaptics(HapticEngine& engine, const ModConfig& cfg, ChartAwareness* chart)
     : engine_(engine), cfg_(cfg), chart_(chart) {}
 
-int JudgementHaptics::bitCount(uint8_t v) {
-    int n=0; v &= 0x0f; while(v){ n += (v & 1u); v >>= 1; } return n;
-}
-
 bool JudgementHaptics::gradeAllowsSustain(Grade g) {
-    return g==Grade::Cool || g==Grade::Fine || g==Grade::Safe || g==Grade::Sad;
+    return g == Grade::Cool || g == Grade::Fine || g == Grade::Safe || g == Grade::Sad;
 }
 
 uint8_t JudgementHaptics::slideSidesForEvent(HapticEvent e) {
@@ -28,31 +23,6 @@ uint8_t JudgementHaptics::slideSidesForEvent(HapticEvent e) {
     case HapticEvent::SlideMixed: return 0x03;
     default: return 0;
     }
-}
-
-JudgementHaptics::Decoded JudgementHaptics::Decode(int32_t raw, int reportedMultiCount) {
-    Decoded d{};
-    if(raw == 21) return d; // HitState_None
-
-    // score-mm's published Mega Mix+ hook documents the game's returned enum as:
-    //   0 COOL, 1 FINE, 2 SAFE, 3 Bad/SAD, 4..7 WRONG variants, 8 MISS/WORST.
-    // The public reference names one output argument multiCount. Retail testing
-    // shows it can remain 1 on real chords, so Decode preserves it only as a hint;
-    // final chord size is inferred later from callback grouping + matched input.
-    if(raw >= 0 && raw <= 3) {
-        d.grade = static_cast<Grade>(raw);
-        d.multiCount = std::max(1, reportedMultiCount);
-        d.valid = true;
-    } else if(raw >= 4 && raw <= 7) {
-        d.grade = Grade::Wrong;
-        d.multiCount = std::max(1, reportedMultiCount);
-        d.valid = true;
-    } else if(raw == 8) {
-        d.grade = Grade::Worst;
-        d.multiCount = std::max(1, reportedMultiCount);
-        d.valid = true;
-    }
-    return d;
 }
 
 const char* JudgementHaptics::GradeName(Grade g) {
@@ -94,18 +64,6 @@ HapticEvent JudgementHaptics::gradeEvent(Grade g) const {
     return HapticEvent::JudgementWorst;
 }
 
-int JudgementHaptics::pendingCount(const Pending& p) const {
-    switch(p.event) {
-    case HapticEvent::Multi2: return 2;
-    case HapticEvent::Multi3: return 3;
-    case HapticEvent::Multi4: return 4;
-    default: {
-        int n=bitCount(p.detail);
-        return n > 0 ? n : 1;
-    }
-    }
-}
-
 bool JudgementHaptics::inGameplayLocked(TP now) const {
     if(!hookAvailable_ || lastGamePoll_==TP{}) return false;
     const auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-lastGamePoll_).count();
@@ -113,56 +71,21 @@ bool JudgementHaptics::inGameplayLocked(TP now) const {
 }
 
 void JudgementHaptics::purgeLocked(TP now) {
-    const auto keepMs = std::max(cfg_.judgement.matchWindowMs, cfg_.judgement.pendingTimeoutMs);
+    const auto keepMs = std::max(1, cfg_.judgement.matchWindowMs);
     while(!pending_.empty() &&
           std::chrono::duration_cast<std::chrono::milliseconds>(now-pending_.front().when).count() > keepMs)
         pending_.pop_front();
     while(pending_.size()>16) pending_.pop_front();
-    const int faceKeepMs = std::max(80, cfg_.judgement.physicalMultiWindowMs * 4);
-    while(!faceSamples_.empty() &&
-          std::chrono::duration_cast<std::chrono::milliseconds>(now-faceSamples_.front().when).count() > faceKeepMs)
-        faceSamples_.pop_front();
-    while(faceSamples_.size()>96) faceSamples_.pop_front();
 }
 
-int JudgementHaptics::physicalChordCountLocked(const ConfirmBurst& burst, uint8_t& maskOut) const {
-    maskOut = 0;
-    if(!burst.active) return 0;
 
-    // The game and our independent HID reader run on different threads. A confirmed
-    // judgement can therefore arrive a few milliseconds before or after the report
-    // containing the full simultaneous face-button mask. Search a short symmetric
-    // history window and keep the mask with the highest cardinality.
-    const int window = std::clamp(cfg_.judgement.physicalMultiWindowMs, 4, 50);
-    const TP begin = burst.first - std::chrono::milliseconds(window);
-    const TP end = burst.last + std::chrono::milliseconds(window);
-    int bestCount = 0;
-    TP bestWhen{};
-    for(const auto& sample : faceSamples_) {
-        if(sample.when < begin || sample.when > end) continue;
-        const uint8_t m = static_cast<uint8_t>(sample.mask & 0x0f);
-        const int n = bitCount(m);
-        if(n > bestCount || (n == bestCount && n > 0 && sample.when > bestWhen)) {
-            bestCount = n;
-            maskOut = m;
-            bestWhen = sample.when;
-        }
-    }
-    return std::clamp(bestCount, 0, 4);
-}
-
-int JudgementHaptics::findPendingLocked(const Decoded& d, bool slide, TP now) const {
+int JudgementHaptics::findPendingLocked(bool slide, TP now) const {
     int best=-1;
     long long bestScore=std::numeric_limits<long long>::max();
     for(size_t i=0;i<pending_.size();++i) {
         const auto age=std::llabs(std::chrono::duration_cast<std::chrono::milliseconds>(now-pending_[i].when).count());
         if(age>cfg_.judgement.matchWindowMs || pending_[i].slide!=slide) continue;
-        long long score=age;
-        // The public score-mm reference names this argument multiCount, but on
-        // retail Mega Mix+ it can remain 1 for real chords. Only use it as a
-        // matching hint when it is actually >1.
-        if(d.multiCount>1 && pendingCount(pending_[i])!=d.multiCount) score += 45;
-        if(score<bestScore){bestScore=score;best=static_cast<int>(i);}
+        if(age<bestScore){bestScore=age;best=static_cast<int>(i);}
     }
     return best;
 }
@@ -173,16 +96,14 @@ void JudgementHaptics::playGradeOverlay(Grade grade) {
     engine_.Trigger(gradeEvent(grade), g);
 }
 
-HapticEvent JudgementHaptics::eventForGameResult(const Pending* p, const Decoded& d, bool gameSlide) {
-    // DIVA is authoritative. A shoulder/key/macro can physically look like one
-    // thing while the in-game key configuration resolves it to another.
+HapticEvent JudgementHaptics::eventForGameResult(const Pending* p, int multiCount, bool gameSlide) {
     if(gameSlide) {
         if(p && p->slide) return p->event; // preserve known left/right direction
         return HapticEvent::SlideMixed;    // mapped key/keyboard: confirmed slide, unknown direction
     }
-    if(d.multiCount>=4) return HapticEvent::Multi4;
-    if(d.multiCount==3) return HapticEvent::Multi3;
-    if(d.multiCount==2) return HapticEvent::Multi2;
+    if(multiCount>=4) return HapticEvent::Multi4;
+    if(multiCount==3) return HapticEvent::Multi3;
+    if(multiCount==2) return HapticEvent::Multi2;
     if(p && !p->slide) {
         switch(p->event) {
         case HapticEvent::Square: case HapticEvent::Cross:
@@ -194,127 +115,12 @@ HapticEvent JudgementHaptics::eventForGameResult(const Pending* p, const Decoded
     return HapticEvent::NoteGeneric;
 }
 
-void JudgementHaptics::playConfirmed(const Pending* p, const Decoded& d, bool gameSlide) {
-    const float g=std::clamp(gradeGain(d.grade),0.0f,2.0f);
-    if(g>0.0f) {
-        const HapticEvent e=eventForGameResult(p,d,gameSlide);
-        const uint8_t detail=p ? p->detail : 0;
-        engine_.Trigger(e,g,detail);
-    }
+void JudgementHaptics::playConfirmed(const Pending* p, Grade grade, int multiCount, bool gameSlide) {
+    const float g=std::clamp(gradeGain(grade),0.0f,2.0f);
+    if(g<=0.0f) return;
+	engine_.Trigger(eventForGameResult(p, multiCount, gameSlide), g);
 }
 
-
-bool JudgementHaptics::takeBurstLocked(TP now, bool force, ConfirmBurst& out) {
-    if(!burst_.active) return false;
-    const auto age=std::chrono::duration_cast<std::chrono::milliseconds>(now-burst_.last).count();
-    // Keep confirmation latency low. Physical chord recovery looks mostly backward
-    // through the timestamped HID history, so it does not need an extra 12-24 ms
-    // delay; the existing same-frame grouping window is enough.
-    const int window=std::clamp(cfg_.judgement.multiGroupWindowMs,1,30);
-    if(!force && age<window) return false;
-    out=burst_;
-    burst_={};
-    return true;
-}
-
-void JudgementHaptics::emitBurst(const ConfirmBurst& b) {
-    if(!b.active || !b.decoded.valid) return;
-    Decoded d=b.decoded;
-
-    ChartJudgementMatch chartMatch{};
-    if(chart_) chartMatch=chart_->ObserveJudgement(b.first,false,b.successNote);
-    if(chartMatch.matched && cfg_.challenge.enabled) {
-        engine_.SetChallengeActive(chartMatch.challengeActive);
-        if(chartMatch.challengeTransition) {
-            engine_.Trigger(chartMatch.challengeActive ? HapticEvent::ChallengeStart : HapticEvent::ChallengeEnd);
-            Log::Info(std::string("DSC Challenge Time: ") + (chartMatch.challengeActive ? "START" : "END") + ".");
-        }
-    }
-
-    int physicalCount=0;
-    uint8_t physicalMask=0;
-    {
-        std::lock_guard lock(mutex_);
-        physicalCount=physicalChordCountLocked(b,physicalMask);
-    }
-
-    const int chartCount=chartMatch.matched ? bitCount(chartMatch.group.faceMask) : 0;
-    if(chartCount>=1 && chartCount<=4)
-        d.multiCount=chartCount;
-    else
-        d.multiCount=std::clamp(std::max({1,physicalCount,b.callbackCount,b.hintedCount,b.reportedMax}),1,4);
-
-    Pending shaped=b.pending;
-    bool haveShaped=b.havePending;
-    if(chartMatch.matched && chartMatch.group.faceMask) {
-        const uint8_t mask=static_cast<uint8_t>(chartMatch.group.faceMask&0x0f);
-        if(!haveShaped){shaped.when=b.first;shaped.slide=false;haveShaped=true;}
-        shaped.detail=mask;
-        switch(d.multiCount){
-        case 4: shaped.event=HapticEvent::Multi4; break;
-        case 3: shaped.event=HapticEvent::Multi3; break;
-        case 2: shaped.event=HapticEvent::Multi2; break;
-        default:
-            if(mask==0x01) shaped.event=HapticEvent::Square;
-            else if(mask==0x02) shaped.event=HapticEvent::Cross;
-            else if(mask==0x04) shaped.event=HapticEvent::Circle;
-            else if(mask==0x08) shaped.event=HapticEvent::Triangle;
-            else shaped.event=HapticEvent::NoteGeneric;
-            break;
-        }
-    } else if(physicalCount>=2 && physicalMask) {
-        if(!haveShaped){shaped.event=HapticEvent::NoteGeneric;shaped.slide=false;shaped.when=b.first;haveShaped=true;}
-        shaped.detail=physicalMask;
-    }
-
-    playGradeOverlay(d.grade);
-    // A miss in one member must not erase the successful members of a chord.
-    // Keep the weakest overall grade for the overlay, but use the weakest
-    // non-miss grade for the note body. An all-miss burst has no note body.
-    Decoded body=d;
-    body.grade=b.bodyGrade;
-    if(body.grade!=Grade::None)
-        playConfirmed(haveShaped ? &shaped : nullptr,body,false);
-
-    if(gradeAllowsSustain(body.grade)) {
-        std::lock_guard lock(mutex_);
-        const uint8_t holdMask=chartMatch.matched ? chartMatch.group.holdMask :
-            (b.havePending ? b.pending.detail : 0);
-        holdEligibleMask_|=static_cast<uint8_t>(holdMask & physicalFaceMask_);
-    }
-
-    const bool chartSuccess=chartMatch.matched && chartMatch.group.specialFaceMask!=0;
-    if((b.successNote||chartSuccess) && gradeAllowsSustain(d.grade))
-        engine_.Trigger(HapticEvent::SuccessNote,gradeGain(d.grade));
-
-    if(cfg_.judgement.logEvents) {
-        std::string source="single";
-        if(chartCount>0) source="chart";
-        else if(physicalCount>1) source="physical-window";
-        else if(b.callbackCount>1) source="game-group";
-        if(b.hintedCount>1 && source!="chart" && source!="physical-window") source += (source=="single" ? "input" : "+input");
-        if(b.reportedMax>1 && source!="chart") source += (source=="single" ? "reported" : "+reported");
-        char physicalHex[8]{}; std::snprintf(physicalHex,sizeof(physicalHex),"0x%X",static_cast<unsigned>(physicalMask));
-        char chartHex[8]{}; std::snprintf(chartHex,sizeof(chartHex),"0x%X",static_cast<unsigned>(chartMatch.matched?chartMatch.group.faceMask:0));
-        Log::Info(std::string("DIVA confirmed: ") + GradeName(d.grade) +
-                  " raw=" + std::to_string(b.rawHitState) +
-                  " body_grade=" + GradeName(body.grade) +
-                  " body_gain=" + std::to_string(gradeGain(body.grade)) +
-                  " multi=" + std::to_string(d.multiCount) +
-                  " chart_multi=" + std::to_string(chartCount) +
-                  " chart_mask=" + chartHex +
-                  " chart_group=" + std::to_string(chartMatch.groupIndex) +
-                  " chart_ms=" + std::to_string(chartMatch.timingErrorMs) +
-                  " physical_multi=" + std::to_string(physicalCount) +
-                  " physical_mask=" + physicalHex +
-                  " callbacks=" + std::to_string(b.callbackCount) +
-                  " input_hint=" + std::to_string(b.hintedCount) +
-                  " reported=" + std::to_string(b.reportedMax) +
-                  " source=" + source +
-                  ((b.successNote||chartSuccess) ? " success_note=1" : " success_note=0") +
-                  (chartMatch.matched && chartMatch.challengeActive ? " challenge=1" : " challenge=0"));
-    }
-}
 
 void JudgementHaptics::Submit(HapticEvent event, uint8_t detailMask, bool slide) {
     if(!cfg_.judgement.enabled) return;
@@ -345,11 +151,6 @@ void JudgementHaptics::UpdatePhysicalFace(uint8_t faceMask) {
         releasedActive = static_cast<uint8_t>(activeHoldMask_ & falling);
         activeHoldMask_ &= faceMask;
         physicalFaceMask_=faceMask;
-        // Record the logical face state on every report. Keeping repeated samples
-        // is intentional: it lets a judgement arriving on another thread match
-        // the state that was actually held across the confirmation instant.
-        faceSamples_.push_back(FaceSample{faceMask,now});
-        while(faceSamples_.size()>96) faceSamples_.pop_front();
         newActive=activeHoldMask_;
     }
     if(releasedActive) engine_.Trigger(HapticEvent::HoldRelease);
@@ -366,93 +167,73 @@ void JudgementHaptics::OnGamePoll() {
     lastGamePoll_=Clock::now();
 }
 
-void JudgementHaptics::OnJudgement(int32_t rawHitState, bool slide, bool slideChain,
+void JudgementHaptics::OnJudgement(Grade grade, bool slide, bool slideChain,
                                    bool slideChainStart, bool slideChainMax,
                                    bool slideChainContinues, bool successNote,
                                    int reportedMultiCount) {
     if(!cfg_.judgement.enabled) return;
-    const auto d=Decode(rawHitState,reportedMultiCount);
-    if(!d.valid) {
-        bool log=false;
-        if(rawHitState!=21){
-            std::lock_guard lock(mutex_);
-            log=unknownResultLogs_++<8;
-        }
-        if(log) Log::Warn("Unsupported DIVA judgement: raw="+std::to_string(rawHitState)+
-                         " reported="+std::to_string(reportedMultiCount) );
-        return;
-    }
+    
+    if(grade == Grade::None) return;
+	
+	const int multiCount = std::clamp(reportedMultiCount, 1, 4);
+
     const auto now=Clock::now();
 
     Pending paired{};
     bool havePair=false;
-    uint8_t chainSides=0;
-    ConfirmBurst flush{};
-    bool haveFlush=false;
-
     {
         std::lock_guard lock(mutex_);
         lastGamePoll_=now;
         purgeLocked(now);
 
-        // A slide is a different mechanic; do not let an immediately preceding
-        // face-note burst wait behind it.
-        if(slide) haveFlush=takeBurstLocked(now,true,flush);
-        else haveFlush=takeBurstLocked(now,false,flush);
-
-        const int pi=findPendingLocked(d,slide,now);
+        const int pi=findPendingLocked(slide,now);
         if(pi>=0) {
             paired=pending_[static_cast<size_t>(pi)];
             pending_.erase(pending_.begin()+pi);
             havePair=true;
         }
 
-        if(slide && gradeAllowsSustain(d.grade) &&
+        if(slide && gradeAllowsSustain(grade) &&
            (slideChain || slideChainStart || slideChainContinues || slideChainMax)) {
-            chainSides = havePair ? slideSidesForEvent(paired.event) : physicalSlideSides_;
-            if(!chainSides) chainSides=chainMask_;
-            if(!chainSides) chainSides=0x03;
-            chainMask_=chainSides;
+            uint8_t sides = havePair ? slideSidesForEvent(paired.event) : physicalSlideSides_;
+            if(!sides) sides = chainMask_;
+            if(!sides) sides = 0x03;
+            chainMask_=sides;
             chainUntil_=now+std::chrono::milliseconds(std::max(90,cfg_.input.chainStartMs+35));
-        }
-
-        if(!slide) {
-            const int hint=havePair ? pendingCount(paired) : 1;
-            if(!burst_.active) {
-                burst_.active=true;
-                burst_.decoded=d;
-                burst_.rawHitState=rawHitState;
-                if(d.grade!=Grade::Worst) burst_.bodyGrade=d.grade;
-                burst_.callbackCount=1;
-                burst_.reportedMax=std::max(1,d.multiCount);
-                burst_.hintedCount=std::max(1,hint);
-                burst_.first=burst_.last=now;
-                burst_.successNote=successNote;
-                if(havePair){burst_.pending=paired;burst_.havePending=true;}
-            } else {
-                // Same-frame/same-moment GetHitState calls are treated as one chord.
-                burst_.callbackCount=std::min(4,burst_.callbackCount+1);
-                burst_.reportedMax=std::max(burst_.reportedMax,std::max(1,d.multiCount));
-                burst_.hintedCount=std::max(burst_.hintedCount,std::max(1,hint));
-                if(static_cast<int>(d.grade)>static_cast<int>(burst_.decoded.grade))
-                    burst_.decoded.grade=d.grade; // use the weakest result in a mixed chord
-                if(d.grade!=Grade::Worst &&
-                   (burst_.bodyGrade==Grade::None || static_cast<int>(d.grade)>static_cast<int>(burst_.bodyGrade)))
-                    burst_.bodyGrade=d.grade;
-                burst_.successNote = burst_.successNote || successNote;
-                burst_.last=now;
-                if(havePair) {
-                    if(!burst_.havePending){burst_.pending=paired;burst_.havePending=true;}
-                    else {
-                        burst_.pending.detail=static_cast<uint8_t>((burst_.pending.detail|paired.detail)&0x0f);
-                        burst_.hintedCount=std::max(burst_.hintedCount,pendingCount(burst_.pending));
-                    }
-                }
-            }
         }
     }
 
-    if(haveFlush) emitBurst(flush);
+	if (!slide) {
+		ChartJudgementMatch chartMatch{};
+		if (chart_) chartMatch = chart_->ObserveJudgement(now, false, successNote);
+		if (chartMatch.matched && cfg_.challenge.enabled) {
+			engine_.SetChallengeActive(chartMatch.challengeActive);
+			if (chartMatch.challengeTransition) {
+				engine_.Trigger(chartMatch.challengeActive ? HapticEvent::ChallengeStart : HapticEvent::ChallengeEnd);
+			}
+		}
+		
+		playGradeOverlay(grade);
+		if (grade != Grade::Worst) {
+			playConfirmed(havePair ? &paired : nullptr, grade, multiCount, false);
+		}
+		if (gradeAllowsSustain(grade)) {
+			std::lock_guard lock(mutex_);
+			const uint8_t holdMask = chartMatch.matched ? chartMatch.group.holdMask : (havePair ? paired.detail : 0);
+			holdEligibleMask_ |= static_cast<uint8_t>(holdMask & physicalFaceMask_);
+		}
+		
+		const bool chartSuccess = chartMatch.matched && chartMatch.group.specialFaceMask != 0;
+		if ((successNote || chartSuccess) && gradeAllowsSustain(grade)) {
+			engine_.Trigger(HapticEvent::SuccessNote, gradeGain(grade));
+		}
+		if(cfg_.judgement.logEvents) {
+            Log::Info(std::string("DIVA grade: ") + GradeName(grade) +
+                      " multi=" + std::to_string(multiCount) +
+                      (chartMatch.matched&&chartMatch.challengeActive ? " challenge=1" : " challenge=0"));
+        }
+		
+	}
 
     if(slide) {
         ChartJudgementMatch chartMatch{};
@@ -463,9 +244,9 @@ void JudgementHaptics::OnJudgement(int32_t rawHitState, bool slide, bool slideCh
                 engine_.Trigger(chartMatch.challengeActive ? HapticEvent::ChallengeStart : HapticEvent::ChallengeEnd);
         }
 
-        Decoded sd=d;
         Pending shaped=paired;
         bool haveShaped=havePair;
+		
         int chartSlideCount=0;
         if(chartMatch.matched && chartMatch.group.slideMask) {
             chartSlideCount=std::max(1,static_cast<int>(chartMatch.group.slideTargetCount));
@@ -475,7 +256,7 @@ void JudgementHaptics::OnJudgement(int32_t rawHitState, bool slide, bool slideCh
             else if(sm==0x02) shaped.event=chartSlideCount>=2?HapticEvent::SlideDoubleRight:HapticEvent::SlideRight;
             else if(havePair && (paired.event==HapticEvent::SlideOutward || paired.event==HapticEvent::SlideInward)) shaped.event=paired.event;
             else shaped.event=HapticEvent::SlideMixed;
-            if(chartMatch.group.chainMask && gradeAllowsSustain(sd.grade)) {
+            if(chartMatch.group.chainMask && gradeAllowsSustain(grade)) {
                 const uint8_t sides=static_cast<uint8_t>(chartMatch.group.chainMask&0x03);
                 {
                     std::lock_guard lock(mutex_);
@@ -484,25 +265,16 @@ void JudgementHaptics::OnJudgement(int32_t rawHitState, bool slide, bool slideCh
                 }
                 engine_.SetChainMask(sides?sides:sm);
             }
-        } else {
-            if(havePair) sd.multiCount=std::max(sd.multiCount,pendingCount(paired));
-        }
+        } 
 
-        playGradeOverlay(sd.grade);
-        if(sd.grade!=Grade::Worst) playConfirmed(haveShaped ? &shaped : nullptr,sd,true);
+        playGradeOverlay(grade);
+        if(grade!=Grade::Worst) playConfirmed(haveShaped ? &shaped : nullptr, grade, multiCount,true);
         const bool chartSuccess=chartMatch.matched && chartMatch.group.specialSlideMask!=0;
-        if((successNote||chartSuccess) && gradeAllowsSustain(sd.grade))
-            engine_.Trigger(HapticEvent::SuccessNote,gradeGain(sd.grade));
+        if((successNote||chartSuccess) && gradeAllowsSustain(grade))
+            engine_.Trigger(HapticEvent::SuccessNote,gradeGain(grade));
         if(cfg_.judgement.logEvents) {
-            Log::Info(std::string("DIVA confirmed: ") + GradeName(sd.grade) +
-                      " slide=1 chain=" + ((slideChain||slideChainStart||slideChainContinues||slideChainMax||(chartMatch.matched&&chartMatch.group.chainMask)) ? std::string("1") : std::string("0")) +
-                      " chart_slide_count=" + std::to_string(chartSlideCount) +
-                      " chart_group=" + std::to_string(chartMatch.groupIndex) +
-                      " chart_ms=" + std::to_string(chartMatch.timingErrorMs) +
-                      " input_hint=" + std::to_string(havePair ? pendingCount(paired) : 1) +
-                      " reported=" + std::to_string(std::max(1,d.multiCount)) +
-                      (chartMatch.matched ? " source=chart" : " source=fallback") +
-                      ((successNote||chartSuccess) ? " success_note=1" : " success_note=0") +
+            Log::Info(std::string("DIVA grade: ") + GradeName(grade) +
+                      " multi=" + std::to_string(multiCount) +
                       (chartMatch.matched&&chartMatch.challengeActive ? " challenge=1" : " challenge=0"));
         }
     }
@@ -514,7 +286,7 @@ void JudgementHaptics::SetHookAvailable(bool available) {
         std::lock_guard lock(mutex_);
         hookAvailable_=available;
         if(!available){
-            pending_.clear(); faceSamples_.clear(); burst_={}; lastGamePoll_={};
+            pending_.clear(); lastGamePoll_={};
             holdEligibleMask_=activeHoldMask_=0;
             physicalFaceMask_=physicalSlideSides_=0;
             chainMask_=0; chainUntil_={};
@@ -539,16 +311,11 @@ void JudgementHaptics::Tick() {
     const auto now=Clock::now();
     uint8_t oldHold=0,newHold=0,newChain=0;
     bool holdStarted=false,holdReleased=false;
-    ConfirmBurst flush{};
-    bool haveFlush=false;
     {
         std::lock_guard lock(mutex_);
         purgeLocked(now);
-        haveFlush=takeBurstLocked(now,false,flush);
         oldHold=activeHoldMask_;
         if(!inGameplayLocked(now)) {
-            // If gameplay just ended, do not lose the final confirmed note.
-            if(!haveFlush) haveFlush=takeBurstLocked(now,true,flush);
             holdEligibleMask_=0;
             activeHoldMask_=0;
             chainMask_=0;
@@ -572,7 +339,6 @@ void JudgementHaptics::Tick() {
         holdStarted=(oldHold==0 && newHold!=0);
         holdReleased=(oldHold!=0 && newHold==0);
     }
-    if(haveFlush) emitBurst(flush);
     if(holdStarted) engine_.Trigger(HapticEvent::HoldStart);
     if(holdReleased) engine_.Trigger(HapticEvent::HoldRelease);
     engine_.SetHoldMask(newHold);

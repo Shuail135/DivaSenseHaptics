@@ -51,11 +51,14 @@ if (-not (Test-Path $smoke)) {
 }
 
 Write-Host "Running core smoke test..."
-& $smoke
-if ($LASTEXITCODE -ne 0) {
-    throw "Core smoke test failed with exit code $LASTEXITCODE."
+$smokeOutput = & $smoke 2>&1
+$smokeExitCode = $LASTEXITCODE
+foreach ($line in $smokeOutput) {
+    Write-Host $line
 }
-
+if ($smokeExitCode -ne 0) {
+    throw "Core smoke test failed with exit code $smokeExitCode."
+}
 $dll = Join-Path $build "$Configuration\DivaSenseHaptics.dll"
 if (-not (Test-Path $dll)) {
     throw "Build completed but the DLL was not found: $dll"

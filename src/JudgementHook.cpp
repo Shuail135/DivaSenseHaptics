@@ -7,14 +7,57 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <MinHook.h>
 
 JudgementHook* JudgementHook::active_ = nullptr;
+
+JudgementHaptics::Grade gradeFromDivaResult(int32_t raw)
+{
+    switch (raw) {
+    case 0:
+        return JudgementHaptics::Grade::Cool;
+
+    case 1:
+        return JudgementHaptics::Grade::Fine;
+
+    case 2:
+        return JudgementHaptics::Grade::Safe;
+
+    case 3:
+        return JudgementHaptics::Grade::Sad;
+
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+        return JudgementHaptics::Grade::Wrong;
+
+    case 8:
+        return JudgementHaptics::Grade::Worst;
+
+    default:
+        return JudgementHaptics::Grade::None;
+    }
+}
 
 namespace {
 constexpr std::array<uint8_t,11> kHitStateAnchor{
     0xE8,0x00,0x00,0x00,0x00,0x48,0x8B,0x4D,0xE8,0x89,0x01
 };
 constexpr char kHitStateMask[] = "x????xxxxxx";
+
+constexpr std::array<uint8_t, 7> kHitStateInternalAnchor{
+    0x66, 0x44, 0x89, 0x4C, 0x24, 0x00, 0x53
+};
+
+constexpr char kHitStateInternalMask[] = "xxxxx?x";
+
+struct InnerJudgementState {
+    bool active = false;
+    int32_t worstRaw = -1;
+};
+
+thread_local InnerJudgementState gInnerJudgement;
 
 bool matchesPattern(const uint8_t* p, const uint8_t* bytes, const char* mask, size_t size) {
     for(size_t i=0;i<size;++i) {
@@ -72,6 +115,63 @@ std::string hexRva(const void* address) {
 uint8_t* JudgementHook::FindHitStateCallSite() {
     return findUniqueExecutablePattern(kHitStateAnchor.data(),kHitStateMask,kHitStateAnchor.size(),
         "DIVA judgement signature matched more than once; judgement hook disabled for safety.");
+}
+
+uint8_t* JudgementHook::FindHitStateInternal() {
+    // First try the signature.
+    if (auto* found = findUniqueExecutablePattern(
+            kHitStateInternalAnchor.data(),
+            kHitStateInternalMask,
+            kHitStateInternalAnchor.size(),
+            "DIVA internal judgement signature matched more than once; inner probe disabled.")) {
+
+        Log::Info(
+            "DIVA inner judgement function found by signature at RVA " +
+            hexRva(found) + ".");
+
+        return found;
+    }
+
+    // score-mm's known RVA for CheckHitStateInternal.
+    // Our outer GetHitState callsite is also at score-mm's exact
+    // expected RVA (0x26BB4C), so try its corresponding inner RVA.
+    constexpr uintptr_t kKnownInternalRva = 0x26D2E0;
+
+    auto* module =
+        reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+
+    if (!module) {
+        Log::Warn(
+            "DIVA inner signature was not found and module base is unavailable.");
+        return nullptr;
+    }
+
+    auto* fallback = module + kKnownInternalRva;
+
+    if (!IsExecutableAddress(fallback)) {
+        Log::Warn(
+            "DIVA inner signature was not found and legacy RVA 0x26D2E0 "
+            "is not executable; inner probe disabled.");
+        return nullptr;
+    }
+
+    // Log the bytes so we can see what changed from the old signature.
+    std::ostringstream ss;
+    ss << "DIVA inner signature not found; trying legacy RVA "
+       << hexRva(fallback)
+       << " bytes=";
+
+    for (int i = 0; i < 16; ++i) {
+        if (i)
+            ss << ' ';
+
+        ss << std::hex
+           << static_cast<unsigned int>(fallback[i]);
+    }
+
+    Log::Warn(ss.str());
+
+    return fallback;
 }
 
 bool JudgementHook::IsExecutableAddress(const void* address) {
@@ -188,34 +288,117 @@ bool JudgementHook::Start() {
 
     Log::Info("DIVA judgement hook installed: callsite RVA " + hexRva(site) +
               ", GetHitState target " + hexRva(target) + ".");
+	uint8_t* internal = FindHitStateInternal();
+
+	if (!internal) {
+		Log::Warn(
+			"DIVA inner judgement function was not found; "
+			"inner judgement probe is disabled.");
+	} else {
+		const MH_STATUS initStatus = MH_Initialize();
+
+		if (initStatus == MH_OK ||
+			initStatus == MH_ERROR_ALREADY_INITIALIZED) {
+
+			minHookOwnsInit_ = (initStatus == MH_OK);
+
+			LPVOID trampoline = nullptr;
+
+			const MH_STATUS createStatus = MH_CreateHook(
+				internal,
+				reinterpret_cast<LPVOID>(&JudgementHook::InternalHookThunk),
+				&trampoline);
+
+			if (createStatus == MH_OK) {
+				originalInternal_ =
+					reinterpret_cast<CheckHitStateInternalFn>(trampoline);
+
+				const MH_STATUS enableStatus = MH_EnableHook(internal);
+
+				if (enableStatus == MH_OK) {
+					internalTarget_ = internal;
+					internalHookInstalled_ = true;
+
+					Log::Info(
+						"DIVA inner judgement probe installed: target RVA " +
+						hexRva(internal) + ".");
+				} else {
+					Log::Warn(
+						std::string("Could not enable inner judgement hook: ") +
+						MH_StatusToString(enableStatus));
+
+					MH_RemoveHook(internal);
+					originalInternal_ = nullptr;
+				}
+			} else {
+				Log::Warn(
+					std::string("Could not create inner judgement hook: ") +
+					MH_StatusToString(createStatus));
+			}
+		} else {
+			Log::Warn(
+				std::string("Could not initialize MinHook: ") +
+				MH_StatusToString(initStatus));
+		}
+	}
 
     return true;
 }
 
 void JudgementHook::Stop() {
-    if(!callSite_) {
-        if(active_==this) active_=nullptr;
-        if(relay_){VirtualFree(relay_,0,MEM_RELEASE);relay_=nullptr;}
-        original_=nullptr;
-        return;
-    }
+	if (internalHookInstalled_ && internalTarget_) {
+		MH_DisableHook(internalTarget_);
+		MH_RemoveHook(internalTarget_);
+	}
 
-    if(std::memcmp(callSite_,patchedBytes_.data(),patchedBytes_.size())==0) {
-        DWORD oldProtect=0;
-        if(VirtualProtect(callSite_,originalBytes_.size(),PAGE_EXECUTE_READWRITE,&oldProtect)) {
-            std::memcpy(callSite_,originalBytes_.data(),originalBytes_.size());
-            FlushInstructionCache(GetCurrentProcess(),callSite_,originalBytes_.size());
-            DWORD ignored=0;
-            VirtualProtect(callSite_,originalBytes_.size(),oldProtect,&ignored);
-        }
-    } else {
-        Log::Warn("DIVA judgement call site changed after installation; leaving the newer patch intact during shutdown.");
-    }
+	internalHookInstalled_ = false;
+	internalTarget_ = nullptr;
+	originalInternal_ = nullptr;
 
+	if (minHookOwnsInit_) {
+		MH_Uninitialize();
+		minHookOwnsInit_ = false;
+	}
+	
+	if (callSite_) {
+		if (std::memcmp(callSite_, patchedBytes_.data(), patchedBytes_.size()) == 0) {
+			DWORD oldProtect = 0;
+			if (VirtualProtect(callSite_, originalBytes_.size(), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+				std::memcpy(callSite_, originalBytes_.data(), originalBytes_.size());
+				FlushInstructionCache( GetCurrentProcess(), callSite_, originalBytes_.size());
+                DWORD ignored = 0;
+                VirtualProtect(callSite_, originalBytes_.size(), oldProtect, &ignored);
+			}
+		}
+	}
+	
     if(active_==this) active_=nullptr;
     callSite_=nullptr;
     original_=nullptr;
     if(relay_){VirtualFree(relay_,0,MEM_RELEASE);relay_=nullptr;}
+	
+}
+
+int32_t __fastcall JudgementHook::InternalHookThunk(
+    void* game,
+    void* target,
+    uint16_t a3,
+    uint16_t a4) {
+
+    JudgementHook* self = active_;
+
+    if (!self || !self->originalInternal_) return 21;
+
+    const int32_t result =
+        self->originalInternal_(game, target, a3, a4);
+
+    if (gInnerJudgement.active && result >= 0 && result <= 8) {
+        if (gInnerJudgement.worstRaw < 0 || result > gInnerJudgement.worstRaw) {
+			gInnerJudgement.worstRaw = result;
+        }
+    }
+
+    return result;
 }
 
 int32_t __fastcall JudgementHook::HookThunk(
@@ -227,15 +410,24 @@ int32_t __fastcall JudgementHook::HookThunk(
     JudgementHook* self=active_;
     if(!self || !self->original_) return 21;
 
+	gInnerJudgement = {};
+	gInnerJudgement.active = self->internalHookInstalled_;
+
     const int32_t result=self->original_(
         game,playDefaultSe,ratingCount,ratingPos,a5,soundEffect,multiCount,
         playerHitTimeBits,targetIndex,isSuccessNote,slide,slideChain,slideChainStart,
         slideChainMax,slideChainContinues,a16);
+		
+	gInnerJudgement.active = false;
+
+	const bool isSlide = slide && *slide;
+	const int32_t gradeRaw = !isSlide &&gInnerJudgement.worstRaw >= 0 ? gInnerJudgement.worstRaw : result;
+	const auto hapticGrade = gradeFromDivaResult(gradeRaw);
 
     self->haptics_.OnGamePoll();
-    if(result!=21) {
+    if(result!=21 && hapticGrade != JudgementHaptics::Grade::None) {
         self->haptics_.OnJudgement(
-            result,
+            hapticGrade,
             slide ? *slide : false,
             slideChain ? *slideChain : false,
             slideChainStart ? *slideChainStart : false,
